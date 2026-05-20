@@ -34,6 +34,525 @@ const CAT_CFG = {
 const fmt = iso => iso ? new Date(iso).toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'}) : '—'
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Template Library — pre-built starter templates
+// ─────────────────────────────────────────────────────────────────────────────
+// Template Library — mirrors Meta's official WhatsApp template library
+// Categories: UTILITY | AUTHENTICATION | MARKETING
+// ─────────────────────────────────────────────────────────────────────────────
+const TEMPLATE_LIBRARY = [
+
+  // ── UTILITY — Account Updates ──────────────────────────────────────────────
+  {
+    id: 'account_creation_confirmation',
+    label: 'Finalize Account Set-Up',
+    metaName: 'account_creation_confirmation_3',
+    category: 'UTILITY', subcat: 'Account Updates', icon: '👤',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'account_creation_confirmation', category: 'UTILITY', language: 'en_US',
+      header_type: 'none', header_text: '',
+      body_text: 'Hi {{1}},\n\nYour new account has been created successfully.\n\nPlease verify {{2}} to complete your profile.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'your email' },
+      buttons: [{ type: 'URL', text: 'Verify Account', url: 'https://example.com/verify' }],
+    },
+  },
+  {
+    id: 'address_update',
+    label: 'Address Update',
+    metaName: 'address_update',
+    category: 'UTILITY', subcat: 'Account Updates', icon: '📍',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'address_update', category: 'UTILITY', language: 'en_US',
+      header_type: 'none', header_text: '',
+      body_text: 'Hi {{1}}, your delivery address has been successfully updated to {{2}}. Contact {{3}} for any inquiries.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': '123 Main St, Chennai', '3': 'support@example.com' },
+      buttons: [],
+    },
+  },
+  {
+    id: 'password_reset',
+    label: 'Password Reset',
+    metaName: 'password_reset_notification',
+    category: 'UTILITY', subcat: 'Account Updates', icon: '🔑',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'password_reset_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Password Reset Request',
+      body_text: 'Hi {{1}},\n\nWe received a request to reset the password for your {{2}} account.\n\nClick the button below to set a new password. This link expires in {{3}}.',
+      footer_text: 'If you did not request this, ignore this message.',
+      variables: { '1': 'Kaviya', '2': 'WebDads', '3': '10 minutes' },
+      buttons: [{ type: 'URL', text: 'Reset Password', url: 'https://example.com/reset' }],
+    },
+  },
+  {
+    id: 'account_suspension_warning',
+    label: 'Account Suspension Warning',
+    metaName: 'account_suspension_warning',
+    category: 'UTILITY', subcat: 'Account Updates', icon: '⚠️',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'account_suspension_warning', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Important Account Notice',
+      body_text: 'Hi {{1}},\n\nYour account has been temporarily suspended due to {{2}}.\n\nTo restore access, please contact our support team before {{3}}.',
+      footer_text: 'We are here to help.',
+      variables: { '1': 'Kaviya', '2': 'suspicious activity', '3': 'April 10, 2026' },
+      buttons: [{ type: 'QUICK_REPLY', text: 'Contact Support', url: '', phone: '' }],
+    },
+  },
+  {
+    id: 'subscription_renewal',
+    label: 'Subscription Renewal Reminder',
+    metaName: 'subscription_renewal_reminder',
+    category: 'UTILITY', subcat: 'Account Updates', icon: '🔄',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'subscription_renewal_reminder', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Subscription Renewal Notice',
+      body_text: 'Hi {{1}},\n\nYour *{{2}}* subscription will automatically renew on *{{3}}* for *{{4}}*.\n\nTo manage your subscription, visit your account settings.',
+      footer_text: 'Reply STOP to cancel auto-renewal.',
+      variables: { '1': 'Kaviya', '2': 'Premium Plan', '3': 'April 5, 2026', '4': '$19.99' },
+      buttons: [{ type: 'URL', text: 'Manage Subscription', url: 'https://example.com/subscription' }],
+    },
+  },
+
+  // ── UTILITY — Order & Delivery ─────────────────────────────────────────────
+  {
+    id: 'order_confirmation',
+    label: 'Order Confirmation',
+    metaName: 'order_confirmation',
+    category: 'UTILITY', subcat: 'Order & Delivery', icon: '🛒',
+    tag: 'Popular', tagColor: 'bg-blue-100 text-blue-700',
+    form: {
+      name: 'order_confirmation', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Order Confirmed!',
+      body_text: 'Hi {{1}},\n\nThank you for your order! Here are your details:\n\nOrder ID: *#{{2}}*\nItems: {{3}}\nTotal: *{{4}}*\nEstimated delivery: *{{5}}*',
+      footer_text: 'Questions? Reply to this message.',
+      variables: { '1': 'Kaviya', '2': 'ORD-12345', '3': '2 items', '4': 'Rs. 1,299', '5': 'Apr 5, 2026' },
+      buttons: [{ type: 'URL', text: 'View Order', url: 'https://example.com/orders/{{1}}' }],
+    },
+  },
+  {
+    id: 'order_shipped',
+    label: 'Order Shipped',
+    metaName: 'order_shipped_notification',
+    category: 'UTILITY', subcat: 'Order & Delivery', icon: '📦',
+    tag: 'Popular', tagColor: 'bg-blue-100 text-blue-700',
+    form: {
+      name: 'order_shipped_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Your Order is on the Way! 🚚',
+      body_text: 'Hi {{1}},\n\nYour order *#{{2}}* has been shipped!\n\nCarrier: {{3}}\nTracking number: *{{4}}*\nEstimated arrival: *{{5}}*',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'ORD-12345', '3': 'FedEx', '4': 'TRK987654321', '5': 'Apr 5, 2026' },
+      buttons: [{ type: 'URL', text: 'Track Package', url: 'https://example.com/track/{{1}}' }],
+    },
+  },
+  {
+    id: 'out_for_delivery',
+    label: 'Out for Delivery',
+    metaName: 'out_for_delivery_notification',
+    category: 'UTILITY', subcat: 'Order & Delivery', icon: '🛵',
+    tag: 'Popular', tagColor: 'bg-blue-100 text-blue-700',
+    form: {
+      name: 'out_for_delivery_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Out for Delivery Today!',
+      body_text: 'Hi {{1}},\n\nGreat news! Your order *#{{2}}* is out for delivery today.\n\nExpected delivery: *{{3}}*\nDelivery agent: {{4}}\n\nPlease be available to receive your package.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'ORD-12345', '3': 'By 6:00 PM', '4': 'Ramesh' },
+      buttons: [
+        { type: 'URL', text: 'Track Live', url: 'https://example.com/track/{{1}}' },
+        { type: 'QUICK_REPLY', text: 'Delivery Instructions', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'delivery_exception',
+    label: 'Delivery Exception / Failed',
+    metaName: 'delivery_exception_notification',
+    category: 'UTILITY', subcat: 'Order & Delivery', icon: '❗',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'delivery_exception_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Delivery Attempt Failed',
+      body_text: 'Hi {{1}},\n\nWe attempted to deliver your order *#{{2}}* on {{3}}, but were unable to complete the delivery.\n\nReason: {{4}}\n\nA re-delivery has been scheduled for *{{5}}*. Please ensure someone is available.',
+      footer_text: 'Contact us to reschedule.',
+      variables: { '1': 'Kaviya', '2': 'ORD-12345', '3': 'Apr 4, 2026', '4': 'No one available', '5': 'Apr 6, 2026' },
+      buttons: [{ type: 'QUICK_REPLY', text: 'Reschedule Delivery', url: '', phone: '' }],
+    },
+  },
+  {
+    id: 'refund_confirmation',
+    label: 'Refund Confirmation',
+    metaName: 'refund_confirmation',
+    category: 'UTILITY', subcat: 'Order & Delivery', icon: '💸',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'refund_confirmation', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Refund Processed',
+      body_text: 'Hi {{1}},\n\nYour refund of *{{2}}* for order *#{{3}}* has been processed successfully.\n\nThe amount will be credited to your {{4}} within *{{5}} business days*.',
+      footer_text: 'Questions? Contact our support team.',
+      variables: { '1': 'Kaviya', '2': 'Rs. 1,299', '3': 'ORD-12345', '4': 'original payment method', '5': '5-7' },
+      buttons: [],
+    },
+  },
+
+  // ── UTILITY — Payments & Finance ──────────────────────────────────────────
+  {
+    id: 'payment_confirmation',
+    label: 'Payment Confirmation',
+    metaName: 'payment_confirmation',
+    category: 'UTILITY', subcat: 'Payments', icon: '✅',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'payment_confirmation', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Payment Received',
+      body_text: 'Hi {{1}},\n\nWe have received your payment of *{{2}}* for *{{3}}*.\n\nTransaction ID: *{{4}}*\nDate: {{5}}\n\nThank you for your payment!',
+      footer_text: 'Keep this message as your receipt.',
+      variables: { '1': 'Kaviya', '2': 'Rs. 2,499', '3': 'Premium Plan', '4': 'TXN-789456', '5': 'Apr 5, 2026' },
+      buttons: [{ type: 'URL', text: 'View Receipt', url: 'https://example.com/receipt/{{1}}' }],
+    },
+  },
+  {
+    id: 'payment_failed',
+    label: 'Payment Failed',
+    metaName: 'payment_failed_notification',
+    category: 'UTILITY', subcat: 'Payments', icon: '❌',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'payment_failed_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Payment Could Not Be Processed',
+      body_text: 'Hi {{1}},\n\nUnfortunately, your payment of *{{2}}* for *{{3}}* could not be processed.\n\nReason: {{4}}\n\nPlease update your payment method or try again.',
+      footer_text: 'Need help? Contact our support team.',
+      variables: { '1': 'Kaviya', '2': 'Rs. 2,499', '3': 'Premium Plan', '4': 'Insufficient funds' },
+      buttons: [
+        { type: 'URL', text: 'Retry Payment', url: 'https://example.com/pay' },
+        { type: 'QUICK_REPLY', text: 'Get Help', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'payment_reminder',
+    label: 'Payment Due Reminder',
+    metaName: 'payment_due_reminder',
+    category: 'UTILITY', subcat: 'Payments', icon: '💳',
+    tag: 'Popular', tagColor: 'bg-blue-100 text-blue-700',
+    form: {
+      name: 'payment_due_reminder', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Payment Due Reminder',
+      body_text: 'Hi {{1}},\n\nThis is a reminder that your payment of *{{2}}* for *{{3}}* is due on *{{4}}*.\n\nPlease complete the payment to avoid any service interruption.',
+      footer_text: 'Reply to this message if you need help.',
+      variables: { '1': 'Kaviya', '2': 'Rs. 2,499', '3': 'Premium Subscription', '4': 'April 10, 2026' },
+      buttons: [
+        { type: 'URL', text: 'Pay Now', url: 'https://example.com/pay' },
+        { type: 'QUICK_REPLY', text: 'Already Paid', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'invoice_notification',
+    label: 'Invoice / Bill Ready',
+    metaName: 'invoice_notification',
+    category: 'UTILITY', subcat: 'Payments', icon: '🧾',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'invoice_notification', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Your Invoice is Ready',
+      body_text: 'Hi {{1}},\n\nYour invoice *#{{2}}* for *{{3}}* is ready.\n\nAmount due: *{{4}}*\nDue date: *{{5}}*\n\nClick below to view and download your invoice.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'INV-2026-001', '3': 'April Services', '4': 'Rs. 5,000', '5': 'April 15, 2026' },
+      buttons: [{ type: 'URL', text: 'View Invoice', url: 'https://example.com/invoice/{{1}}' }],
+    },
+  },
+
+  // ── UTILITY — Appointments ─────────────────────────────────────────────────
+  {
+    id: 'appointment_confirmation',
+    label: 'Appointment Confirmation',
+    metaName: 'appointment_confirmation',
+    category: 'UTILITY', subcat: 'Appointments', icon: '📅',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'appointment_confirmation', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Appointment Confirmed!',
+      body_text: 'Hi {{1}},\n\nYour appointment has been confirmed.\n\n🏥 With: *{{2}}*\n📅 Date: *{{3}}*\n⏰ Time: *{{4}}*\n📍 Location: {{5}}\n\nPlease arrive 10 minutes early.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'Dr. Ramesh', '3': 'April 5, 2026', '4': '10:00 AM', '5': 'City Clinic, Chennai' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Confirm', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Reschedule', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'appointment_reminder',
+    label: 'Appointment Reminder',
+    metaName: 'appointment_reminder',
+    category: 'UTILITY', subcat: 'Appointments', icon: '⏰',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'appointment_reminder', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Appointment Reminder',
+      body_text: 'Hi {{1}},\n\nThis is a reminder for your appointment *tomorrow*.\n\n📅 Date: *{{2}}*\n⏰ Time: *{{3}}*\n📍 Location: {{4}}\n\nReply to reschedule.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'April 5, 2026', '3': '10:00 AM', '4': 'City Clinic, Chennai' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Confirm', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Cancel', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'appointment_cancelled',
+    label: 'Appointment Cancellation',
+    metaName: 'appointment_cancelled',
+    category: 'UTILITY', subcat: 'Appointments', icon: '🚫',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'appointment_cancelled', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Appointment Cancelled',
+      body_text: 'Hi {{1}},\n\nWe are sorry to inform you that your appointment on *{{2}}* at *{{3}}* with *{{4}}* has been cancelled.\n\nReason: {{5}}\n\nPlease reschedule at your convenience.',
+      footer_text: 'We apologise for any inconvenience.',
+      variables: { '1': 'Kaviya', '2': 'April 5, 2026', '3': '10:00 AM', '4': 'Dr. Ramesh', '5': 'Doctor unavailable' },
+      buttons: [{ type: 'URL', text: 'Book New Slot', url: 'https://example.com/book' }],
+    },
+  },
+
+  // ── UTILITY — Customer Support ─────────────────────────────────────────────
+  {
+    id: 'ticket_created',
+    label: 'Support Ticket Created',
+    metaName: 'support_ticket_created',
+    category: 'UTILITY', subcat: 'Customer Support', icon: '🎫',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'support_ticket_created', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Support Ticket Created',
+      body_text: 'Hi {{1}},\n\nYour support ticket *#{{2}}* has been created successfully.\n\nIssue: {{3}}\nPriority: {{4}}\n\nOur team will respond within {{5}}.',
+      footer_text: 'Track your ticket status online.',
+      variables: { '1': 'Kaviya', '2': 'TKT-56789', '3': 'Login issue', '4': 'High', '5': '2 business hours' },
+      buttons: [{ type: 'URL', text: 'View Ticket', url: 'https://example.com/tickets/{{1}}' }],
+    },
+  },
+  {
+    id: 'ticket_resolved',
+    label: 'Support Ticket Resolved',
+    metaName: 'support_ticket_resolved',
+    category: 'UTILITY', subcat: 'Customer Support', icon: '✅',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'support_ticket_resolved', category: 'UTILITY', language: 'en_US',
+      header_type: 'text', header_text: 'Your Issue Has Been Resolved',
+      body_text: 'Hi {{1}},\n\nWe are happy to inform you that your support ticket *#{{2}}* regarding *{{3}}* has been resolved.\n\nResolution: {{4}}\n\nPlease let us know if you need any further assistance.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'TKT-56789', '3': 'login issue', '4': 'Password reset link sent' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Issue Resolved', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Still Having Issue', url: '', phone: '' },
+      ],
+    },
+  },
+
+  // ── AUTHENTICATION ─────────────────────────────────────────────────────────
+  {
+    id: 'otp_verification',
+    label: 'OTP Verification Code',
+    metaName: 'otp_verification',
+    category: 'AUTHENTICATION', subcat: 'Authentication', icon: '🔐',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'otp_verification', category: 'AUTHENTICATION', language: 'en_US',
+      header_type: 'none', header_text: '',
+      body_text: '*{{1}}* is your verification code.\n\nFor your security, do not share this code with anyone. This code expires in {{2}} minutes.',
+      footer_text: 'This is an automated message.',
+      variables: { '1': '123456', '2': '10' },
+      buttons: [],
+    },
+  },
+  {
+    id: 'two_factor_auth',
+    label: 'Two-Factor Authentication',
+    metaName: 'two_factor_authentication',
+    category: 'AUTHENTICATION', subcat: 'Authentication', icon: '🛡️',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'two_factor_authentication', category: 'AUTHENTICATION', language: 'en_US',
+      header_type: 'none', header_text: '',
+      body_text: 'Hi {{1}},\n\nYour two-factor authentication code for *{{2}}* is:\n\n*{{3}}*\n\nThis code is valid for {{4}} minutes. Do not share it with anyone.',
+      footer_text: 'If you did not request this, secure your account immediately.',
+      variables: { '1': 'Kaviya', '2': 'WebDads App', '3': '847261', '4': '5' },
+      buttons: [],
+    },
+  },
+  {
+    id: 'login_alert',
+    label: 'New Login Alert',
+    metaName: 'new_login_alert',
+    category: 'AUTHENTICATION', subcat: 'Authentication', icon: '🔔',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'new_login_alert', category: 'AUTHENTICATION', language: 'en_US',
+      header_type: 'text', header_text: 'New Login Detected',
+      body_text: 'Hi {{1}},\n\nA new sign-in to your {{2}} account was detected.\n\n📍 Location: {{3}}\n🖥 Device: {{4}}\n🕐 Time: {{5}}\n\nIf this was not you, secure your account immediately.',
+      footer_text: '',
+      variables: { '1': 'Kaviya', '2': 'WebDads', '3': 'Chennai, India', '4': 'Chrome on Windows', '5': '15:44, Apr 5, 2026' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'This Was Me', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Secure Account', url: '', phone: '' },
+      ],
+    },
+  },
+
+  // ── MARKETING ─────────────────────────────────────────────────────────────
+  {
+    id: 'welcome_message',
+    label: 'Welcome New Customer',
+    metaName: 'welcome_new_customer',
+    category: 'MARKETING', subcat: 'Onboarding', icon: '👋',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'welcome_new_customer', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'Welcome to the Family!',
+      body_text: 'Hi {{1}},\n\nWelcome to *{{2}}*! We are thrilled to have you on board.\n\nHere is a special *{{3}}% OFF* discount on your first purchase.\n\nUse code: *{{4}}*\n\nValid until {{5}}. Happy shopping!',
+      footer_text: 'Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': 'WebDads Store', '3': '20', '4': 'WELCOME20', '5': 'April 10, 2026' },
+      buttons: [{ type: 'URL', text: 'Shop Now', url: 'https://example.com' }],
+    },
+  },
+  {
+    id: 'promotional_offer',
+    label: 'Promotional Offer',
+    metaName: 'promotional_offer',
+    category: 'MARKETING', subcat: 'Promotions', icon: '🎁',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'promotional_offer', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'Exclusive Offer Just for You!',
+      body_text: 'Hi {{1}},\n\nWe have a special offer for you!\n\n*{{2}} OFF* on all orders above {{3}}.\n\nUse code: *{{4}}*\nValid until: *{{5}}*\n\nDon\'t miss out!',
+      footer_text: 'T&C apply. Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': '30%', '3': 'Rs. 999', '4': 'SALE30', '5': 'April 10, 2026' },
+      buttons: [{ type: 'URL', text: 'Claim Offer', url: 'https://example.com/sale' }],
+    },
+  },
+  {
+    id: 'abandoned_cart',
+    label: 'Abandoned Cart Recovery',
+    metaName: 'abandoned_cart_reminder',
+    category: 'MARKETING', subcat: 'Promotions', icon: '🛒',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'abandoned_cart_reminder', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'You Left Something Behind!',
+      body_text: 'Hi {{1}},\n\nYou left *{{2}}* in your cart!\n\nYour cart total: *{{3}}*\n\nItems are selling fast. Complete your order now and get *{{4}}% OFF* with code *{{5}}*.',
+      footer_text: 'Offer valid for 24 hours only.',
+      variables: { '1': 'Kaviya', '2': '3 items', '3': 'Rs. 2,199', '4': '10', '5': 'CART10' },
+      buttons: [
+        { type: 'URL', text: 'Complete Order', url: 'https://example.com/cart' },
+        { type: 'QUICK_REPLY', text: 'View Cart', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'back_in_stock',
+    label: 'Back in Stock Alert',
+    metaName: 'back_in_stock_notification',
+    category: 'MARKETING', subcat: 'Promotions', icon: '📢',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'back_in_stock_notification', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'Good News — It\'s Back!',
+      body_text: 'Hi {{1}},\n\nGreat news! *{{2}}* is back in stock!\n\nYou wished for it, and now it\'s available. But hurry — only *{{3}} units* left.\n\nGet yours before it sells out again!',
+      footer_text: 'Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': 'iPhone 15 Pro Case', '3': '12' },
+      buttons: [{ type: 'URL', text: 'Buy Now', url: 'https://example.com/product' }],
+    },
+  },
+  {
+    id: 'loyalty_reward',
+    label: 'Loyalty Points / Reward',
+    metaName: 'loyalty_points_earned',
+    category: 'MARKETING', subcat: 'Loyalty', icon: '⭐',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'loyalty_points_earned', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'You\'ve Earned Reward Points!',
+      body_text: 'Hi {{1}},\n\nCongratulations! You\'ve earned *{{2}} points* on your recent purchase of *{{3}}*.\n\nTotal balance: *{{4}} points*\n\nRedeem your points on your next order for amazing discounts!',
+      footer_text: 'Points valid for 12 months.',
+      variables: { '1': 'Kaviya', '2': '150', '3': 'Premium Headphones', '4': '1,250' },
+      buttons: [{ type: 'URL', text: 'Redeem Points', url: 'https://example.com/loyalty' }],
+    },
+  },
+  {
+    id: 'webinar_invite',
+    label: 'Webinar / Event Invite',
+    metaName: 'webinar_invitation',
+    category: 'MARKETING', subcat: 'Events', icon: '🎓',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'webinar_invitation', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'You\'re Invited!',
+      body_text: 'Hi {{1}},\n\nYou\'re invited to join our exclusive *Free Webinar* on *{{2}}*!\n\n📅 Date: {{3}}\n⏰ Time: {{4}}\n\nLearn from industry experts and boost your skills. Don\'t miss this opportunity!\n\nRegister now and secure your spot.',
+      footer_text: 'Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': 'AI Tools for Business', '3': 'April 5, 2026', '4': '10:00 AM IST' },
+      buttons: [{ type: 'URL', text: 'Register Now', url: 'https://example.com/register' }],
+    },
+  },
+  {
+    id: 'feedback_request',
+    label: 'Feedback / Survey Request',
+    metaName: 'feedback_request',
+    category: 'MARKETING', subcat: 'Feedback', icon: '⭐',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'feedback_request', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'How Did We Do?',
+      body_text: 'Hi {{1}},\n\nThank you for your recent purchase of *{{2}}*!\n\nWe\'d love to hear your feedback. Your opinion helps us improve our service.',
+      footer_text: 'Takes less than 30 seconds.',
+      variables: { '1': 'Kaviya', '2': 'Premium Plan' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Excellent', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Good', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Needs Work', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'lead_followup',
+    label: 'Lead Follow-Up',
+    metaName: 'lead_followup',
+    category: 'MARKETING', subcat: 'Sales', icon: '🎯',
+    tag: 'Popular', tagColor: 'bg-violet-100 text-violet-700',
+    form: {
+      name: 'lead_followup', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'Following Up on Your Inquiry',
+      body_text: 'Hi {{1}},\n\nThank you for your interest in *{{2}}*!\n\nOur team would love to connect with you. We have a special offer available this week that we think you\'ll love.\n\nCan we schedule a quick 15-minute call?',
+      footer_text: 'Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': 'our services' },
+      buttons: [
+        { type: 'QUICK_REPLY', text: 'Yes, Let\'s Talk!', url: '', phone: '' },
+        { type: 'QUICK_REPLY', text: 'Not Interested', url: '', phone: '' },
+      ],
+    },
+  },
+  {
+    id: 'reengagement',
+    label: 'Re-Engagement / Win-Back',
+    metaName: 'reengagement_campaign',
+    category: 'MARKETING', subcat: 'Sales', icon: '💫',
+    tag: 'Meta Official', tagColor: 'bg-emerald-100 text-emerald-700',
+    form: {
+      name: 'reengagement_campaign', category: 'MARKETING', language: 'en_US',
+      header_type: 'text', header_text: 'We Miss You!',
+      body_text: 'Hi {{1}},\n\nIt has been a while since we last heard from you! We miss having you around.\n\nAs a special token of appreciation, here is *{{2}}% OFF* your next order.\n\nUse code: *{{3}}*\nValid until: *{{4}}*',
+      footer_text: 'T&C apply. Reply STOP to unsubscribe.',
+      variables: { '1': 'Kaviya', '2': '25', '3': 'COMEBACK25', '4': 'April 15, 2026' },
+      buttons: [{ type: 'URL', text: 'Shop Now', url: 'https://example.com' }],
+    },
+  },
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Small re-usable atoms
 // ─────────────────────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -345,7 +864,27 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
     setHeaderUploading(false)
   }
 
-  const [form, setForm] = useState({
+  // Library prefills carry _form with all fields already set
+  const libForm = prefill?._fromLibrary ? prefill._form : null
+
+  const [form, setForm] = useState(libForm ? {
+    name:            libForm.name || '',
+    category:        libForm.category || 'MARKETING',
+    language:        libForm.language || 'en_US',
+    header_type:     libForm.header_type || 'none',
+    header_text:     libForm.header_text || '',
+    header_media:    '',
+    header_doc_name: '',
+    body_text:       libForm.body_text || '',
+    footer_text:     libForm.footer_text || '',
+    variables:       libForm.variables || {},
+    buttons:         (libForm.buttons || []).map(b => ({
+      type:  (b.type || 'QUICK_REPLY').toUpperCase(),
+      text:  b.text  || '',
+      url:   b.url   || '',
+      phone: b.phone || '',
+    })),
+  } : {
     name:         prefill?.name ? `${prefill.name}_copy` : '',
     category:     prefill?.category  || 'MARKETING',
     language:     prefill?.language  || 'en_US',
@@ -380,16 +919,19 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
     if (form.header_type !== 'none') {
       const comp = { type: 'HEADER' }
       if (form.header_type === 'text') {
-        comp.format = 'TEXT'
-        comp.text   = form.header_text
+        // Only include TEXT header if text is non-empty — Meta rejects empty text headers
+        if (form.header_text.trim()) {
+          comp.format = 'TEXT'
+          comp.text   = form.header_text.trim()
+          comps.push(comp)
+        }
       } else {
         comp.format = form.header_type.toUpperCase()
         if (headerHandle) {
           comp.example = { header_handle: [headerHandle] }
         }
-        // If no handle yet (unlikely if UI enforces upload), skip example
+        comps.push(comp)
       }
-      comps.push(comp)
     }
 
     const bodyComp = { type: 'BODY', text: form.body_text }
@@ -406,7 +948,12 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
 
     if (form.buttons.length > 0) {
       const buttons = form.buttons.map(b => {
-        if (b.type === 'URL')          return { type:'URL',          text:b.text, url:b.url }
+        if (b.type === 'URL') {
+          // Auto-fix URL protocol
+          let url = (b.url || '').trim()
+          if (url && !url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url
+          return { type:'URL', text:b.text, url }
+        }
         if (b.type === 'PHONE_NUMBER') return { type:'PHONE_NUMBER', text:b.text, phone_number:b.phone }
         return { type:'QUICK_REPLY', text:b.text }
       })
@@ -454,7 +1001,7 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
         {/* Top bar */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
           <div>
-            <h2 className="text-base font-bold text-slate-900">{prefill ? 'Duplicate Template' : 'Create Template'}</h2>
+            <h2 className="text-base font-bold text-slate-900">{prefill?._fromLibrary ? 'Use Library Template' : prefill ? 'Duplicate Template' : 'Create Template'}</h2>
             <p className="text-xs text-slate-400 mt-0.5">Step {step+1} of {STEPS.length} — {STEPS[step]}</p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl text-xl leading-none">×</button>
@@ -857,11 +1404,151 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Templates Page
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Template Library Tab
+// ─────────────────────────────────────────────────────────────────────────────
+const LIB_CATS = ['All', 'UTILITY', 'AUTHENTICATION', 'MARKETING']
+const SUBCAT_ORDER = {
+  UTILITY:        ['Account Updates','Order & Delivery','Payments','Appointments','Customer Support'],
+  AUTHENTICATION: ['Authentication'],
+  MARKETING:      ['Onboarding','Promotions','Loyalty','Events','Feedback','Sales'],
+}
+
+function LibraryTab({ onUse }) {
+  const [libCat,    setLibCat]    = useState('All')
+  const [libSearch, setLibSearch] = useState('')
+
+  const filtered = TEMPLATE_LIBRARY.filter(t => {
+    const matchCat    = libCat === 'All' || t.category === libCat
+    const q           = libSearch.toLowerCase()
+    const matchSearch = !q || t.label.toLowerCase().includes(q) || t.subcat.toLowerCase().includes(q) || t.metaName.toLowerCase().includes(q)
+    return matchCat && matchSearch
+  })
+
+  // Group by subcat
+  const groups = {}
+  filtered.forEach(t => {
+    if (!groups[t.subcat]) groups[t.subcat] = []
+    groups[t.subcat].push(t)
+  })
+  const subcats = Object.keys(groups).sort((a, b) => {
+    const orderA = (SUBCAT_ORDER[libCat] || []).indexOf(a)
+    const orderB = (SUBCAT_ORDER[libCat] || []).indexOf(b)
+    return (orderA === -1 ? 99 : orderA) - (orderB === -1 ? 99 : orderB)
+  })
+
+  return (
+    <div className="space-y-5">
+      {/* Header + controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex-1">
+          <h2 className="text-base font-bold text-slate-800">Template Library</h2>
+          <p className="text-xs text-slate-400 mt-0.5">{TEMPLATE_LIBRARY.length} ready-made templates — click "Use Template" to customise and submit to Meta</p>
+        </div>
+        <div className="relative w-full sm:w-56">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="none">
+            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M13 13l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <input value={libSearch} onChange={e => setLibSearch(e.target.value)} placeholder="Search templates…"
+            className="w-full bg-white border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-sm text-slate-700 placeholder-slate-400 outline-none focus:border-blue-400 transition-colors"/>
+        </div>
+      </div>
+
+      {/* Category filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {LIB_CATS.map(c => {
+          const count = c === 'All' ? TEMPLATE_LIBRARY.length : TEMPLATE_LIBRARY.filter(t => t.category === c).length
+          return (
+            <button key={c} onClick={() => setLibCat(c)}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all
+                ${libCat===c
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
+              {c !== 'All' && (CAT_CFG[c]?.icon || '')} {c === 'All' ? 'All Templates' : c}
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${libCat===c?'bg-white/20 text-white':'bg-slate-100 text-slate-500'}`}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <span className="text-4xl opacity-20">🔍</span>
+          <p className="text-sm text-slate-500">No templates match "{libSearch}"</p>
+          <button onClick={()=>setLibSearch('')} className="text-xs text-blue-600 hover:underline">Clear search</button>
+        </div>
+      )}
+
+      {/* Grouped cards */}
+      {subcats.map(subcat => (
+        <div key={subcat} className="space-y-3">
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{subcat}</p>
+            <div className="flex-1 h-px bg-slate-200"/>
+            <span className="text-[10px] text-slate-400">{groups[subcat].length} template{groups[subcat].length!==1?'s':''}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {groups[subcat].map(tpl => (
+              <div key={tpl.id}
+                className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md hover:border-blue-300 transition-all flex flex-col group">
+
+                {/* Card top */}
+                <div className="px-4 pt-4 pb-3">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0
+                        ${tpl.category==='MARKETING'?'bg-violet-100':tpl.category==='AUTHENTICATION'?'bg-orange-100':'bg-blue-100'}`}>
+                        {tpl.icon}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800 leading-tight line-clamp-2">{tpl.label}</p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{tpl.metaName}</p>
+                      </div>
+                    </div>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-1 ${tpl.tagColor}`}>{tpl.tag}</span>
+                  </div>
+
+                  {/* Body preview */}
+                  <p className="text-[11px] text-slate-500 line-clamp-3 leading-relaxed">
+                    {tpl.form.body_text
+                      .replace(/\*([^*]+)\*/g, '$1')
+                      .replace(/\{\{(\w+)\}\}/g, (_, k) => tpl.form.variables?.[k] || `[${k}]`)
+                    }
+                  </p>
+                </div>
+
+                {/* Buttons preview */}
+                {tpl.form.buttons?.length > 0 && (
+                  <div className="px-4 pb-3 flex flex-wrap gap-1">
+                    {tpl.form.buttons.slice(0,3).map((b,i)=>(
+                      <span key={i} className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                        {b.type==='URL'?'🔗':b.type==='PHONE_NUMBER'?'📞':'↩'} {b.text}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Use button */}
+                <div className="mt-auto px-4 py-3 border-t border-slate-100 bg-slate-50/50">
+                  <button onClick={() => onUse(tpl)}
+                    className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors">
+                    Use Template →
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const PER_PAGE = 12
 
 export default function Templates() {
   const [templates,  setTemplates]  = useState([])
-  const [total,      setTotal]      = useState(0)
   const [loading,    setLoading]    = useState(false)
   const [syncing,    setSyncing]    = useState(false)
   const [search,     setSearch]     = useState('')
@@ -872,13 +1559,13 @@ export default function Templates() {
   const [showCreate, setShowCreate] = useState(false)
   const [prefill,    setPrefill]    = useState(null)
   const [layout,     setLayout]     = useState('table')  // table | card
+  const [mainTab,    setMainTab]    = useState('my')     // my | library
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await api.get('/templates/local')
       setTemplates(data.templates || [])
-      setTotal((data.templates||[]).length)
     } catch {}
     setLoading(false)
   }, [])
@@ -988,6 +1675,40 @@ export default function Templates() {
       </div>
 
       <div className="max-w-screen-xl mx-auto px-6 py-6 space-y-5">
+
+        {/* ── Tab bar ──────────────────────────────────────────────────── */}
+        <div className="flex items-center gap-1 border-b border-slate-200">
+          {[
+            { id:'my',      label:'My Templates', icon:'📋' },
+            { id:'library', label:'Template Library', icon:'📚' },
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setMainTab(tab.id)}
+              className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold border-b-2 transition-all -mb-px
+                ${mainTab===tab.id
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              {tab.icon} {tab.label}
+              {tab.id === 'my' && templates.length > 0 && (
+                <span className="text-[10px] font-bold bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full">{templates.length}</span>
+              )}
+              {tab.id === 'library' && (
+                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{TEMPLATE_LIBRARY.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Template Library tab ────────────────────────────────────── */}
+        {mainTab === 'library' && (
+          <LibraryTab onUse={(tpl) => {
+            setPrefill({ _fromLibrary:true, name:tpl.form.name, category:tpl.form.category, language:tpl.form.language, _form:tpl.form, components:[] })
+            setShowCreate(true)
+            setMainTab('my')
+          }}/>
+        )}
+
+        {/* ── My Templates tab ─────────────────────────────────────────── */}
+        {mainTab === 'my' && (<>
 
         {/* ── Stats row ─────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1180,6 +1901,8 @@ export default function Templates() {
             )}
           </>
         )}
+
+        </>)}  {/* end mainTab === 'my' */}
       </div>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}

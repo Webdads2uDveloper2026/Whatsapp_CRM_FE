@@ -10,7 +10,10 @@ export const api = axios.create({
 })
 
 api.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('access_token')
+  const isAgentRoute = window.location.pathname.startsWith('/agent')
+  const token = isAgentRoute
+    ? (localStorage.getItem('agent_access_token') || localStorage.getItem('access_token'))
+    : localStorage.getItem('access_token')
   if (token) cfg.headers.Authorization = `Bearer ${token}`
   return cfg
 })
@@ -37,20 +40,46 @@ api.interceptors.response.use(
     orig._retry = true
     refreshing  = true
 
-    const refresh = localStorage.getItem('refresh_token')
-    if (!refresh) { _logout(); return Promise.reject(err) }
+    const isAgentRoute = window.location.pathname.startsWith('/agent')
+    const refresh = isAgentRoute
+      ? localStorage.getItem('agent_refresh_token')
+      : localStorage.getItem('refresh_token')
+
+    if (!refresh) {
+      if (isAgentRoute) {
+        localStorage.removeItem('agent_access_token')
+        localStorage.removeItem('agent_refresh_token')
+        window.location.href = '/agent-login'
+      } else {
+        _logout()
+      }
+      return Promise.reject(err)
+    }
+
+    const refreshEndpoint = isAgentRoute ? '/agents/refresh' : '/auth/refresh'
 
     try {
-      const { data } = await axios.post(`${BASE}/auth/refresh`, { refresh_token: refresh })
-      localStorage.setItem('access_token',  data.access_token)
-      localStorage.setItem('refresh_token', data.refresh_token)
+      const { data } = await axios.post(`${BASE}${refreshEndpoint}`, { refresh_token: refresh })
+      if (isAgentRoute) {
+        localStorage.setItem('agent_access_token', data.access_token)
+        localStorage.setItem('agent_refresh_token', data.refresh_token)
+      } else {
+        localStorage.setItem('access_token',  data.access_token)
+        localStorage.setItem('refresh_token', data.refresh_token)
+      }
       api.defaults.headers.common.Authorization = `Bearer ${data.access_token}`
       drain(null, data.access_token)
       orig.headers.Authorization = `Bearer ${data.access_token}`
       return api(orig)
     } catch (e) {
       drain(e)
-      _logout()
+      if (isAgentRoute) {
+        localStorage.removeItem('agent_access_token')
+        localStorage.removeItem('agent_refresh_token')
+        window.location.href = '/agent-login'
+      } else {
+        _logout()
+      }
       return Promise.reject(e)
     } finally {
       refreshing = false

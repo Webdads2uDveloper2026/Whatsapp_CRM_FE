@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
+import image1 from '../../assets/webdadslogo.svg'
+import image2 from '../../assets/webdadsicon.svg'
 
 const inp = {
   width:'100%', background:'#0d1117', border:'1px solid #30363d',
@@ -58,8 +60,10 @@ export default function Register() {
       <div style={{ width:'460px', flexShrink:0, padding:'48px 44px', background:'linear-gradient(160deg,#0d1117 0%,#161b22 100%)', borderRight:'1px solid #21262d', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:'12px', marginBottom:'52px' }}>
-            <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:'linear-gradient(135deg,#25D366,#128C7E)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800', color:'#fff', fontSize:'20px', boxShadow:'0 4px 16px rgba(37,211,102,.25)' }}>W</div>
-            <span style={{ fontSize:'18px', fontWeight:'700', color:'#e6edf3' }}>WhatsApp CRM</span>
+            <img src={image2} alt="Logo" style={{ width:'40px', height:'40px'}} />
+            <img src={image1} alt="Logo" style={{ width:'100px', height:'40px' }} />
+            {/* <div style={{ width:'40px', height:'40px', borderRadius:'12px', background:'linear-gradient(135deg,#25D366,#128C7E)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800', color:'#fff', fontSize:'20px', boxShadow:'0 4px 16px rgba(37,211,102,.25)' }}>W</div>
+            <span style={{ fontSize:'18px', fontWeight:'700', color:'#e6edf3' }}>WhatsApp CRM</span> */}
           </div>
 
           <h2 style={{ fontSize:'28px', fontWeight:'800', color:'#e6edf3', lineHeight:1.25, marginBottom:'14px' }}>

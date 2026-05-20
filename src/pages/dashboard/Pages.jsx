@@ -306,65 +306,196 @@ export function Automations() {
 
 // ── Agents ────────────────────────────────────────────────────────────────────
 export function Agents() {
-  const [agents,setAgents]=useState([])
-  const [show,setShow]=useState(false)
-  const [form,setForm]=useState({name:'',email:'',password:'',role:'agent'})
-  const [saving,setSaving]=useState(false)
-  const [error,setError]=useState('')
-  const load=()=>api.get('/agents').then(r=>setAgents(r.data||[])).catch(()=>{})
-  useEffect(()=>{load()},[])
-  const create=async e=>{
-    e.preventDefault();setSaving(true);setError('')
-    try{await api.post('/agents',form);setShow(false);load()}catch(e){setError(e.response?.data?.detail||'Error')}
-    setSaving(false)
+  const { tenant } = useAuthStore()
+  const [agents,    setAgents]   = useState([])
+  const [loading,   setLoading]  = useState(true)
+  const [show,      setShow]     = useState(false)
+  const [editAgent, setEditAgent]= useState(null)
+  const [form,      setForm]     = useState({ name:'', email:'', password:'', role:'agent' })
+  const [saving,    setSaving]   = useState(false)
+  const [error,     setError]    = useState('')
+  const [copied,    setCopied]   = useState(false)
+
+  console.log('Tenant info:', tenant) // Debugging line to check tenant data
+  console.log('Agents data:', agents) // Debugging line to check agents data
+  const load = () => {
+    setLoading(true)
+    api.get('/agents').then(r => setAgents(r.data || [])).catch(() => {}).finally(() => setLoading(false))
   }
-  const ROLE={superadmin:{bg:'rgba(248,81,73,.1)',color:'#f85149',border:'rgba(248,81,73,.2)'},manager:{bg:'rgba(56,139,253,.1)',color:'#388bfd',border:'rgba(56,139,253,.2)'},agent:{bg:'rgba(139,148,158,.1)',color:'#8b949e',border:'rgba(139,148,158,.2)'}}
+  useEffect(() => { load() }, [])
+
+  const openAdd = () => { setForm({ name:'', email:'', password:'', role:'agent' }); setError(''); setEditAgent(null); setShow(true) }
+  const openEdit = a => { setForm({ name: a.name, email: a.email, password:'', role: a.role }); setError(''); setEditAgent(a); setShow(true) }
+  const closeModal = () => { setShow(false); setEditAgent(null); setError('') }
+
+  const submit = async e => {
+    e.preventDefault(); setSaving(true); setError('')
+    try {
+      if (editAgent) {
+        const payload = { name: form.name, role: form.role }
+        if (form.password) payload.password = form.password
+        await api.patch(`/agents/${editAgent.id}`, payload)
+      } else {
+        await api.post('/agents', form)
+      }
+      closeModal(); load()
+    } catch (e) { setError(e.response?.data?.detail || 'Something went wrong') }
+    finally { setSaving(false) }
+  }
+
+  const toggleActive = async a => {
+    try { await api.post(`/agents/${a.id}/${a.is_active ? 'deactivate' : 'activate'}`); load() } catch {}
+  }
+
+  const deleteAgent = async a => {
+    if (!window.confirm(`Remove ${a.name}? This cannot be undone.`)) return
+    try { await api.delete(`/agents/${a.id}`); load() } catch {}
+  }
+
+  const copyTenantId = () => {
+    navigator.clipboard.writeText(agents.map((item)=>{
+      if(item.tenant_id){
+        return item.tenant_id
+      }
+    }) || '')
+    setCopied(true); setTimeout(() => setCopied(false), 2000)
+  }
+
+  const ROLE_C = {
+    superadmin: { bg:'rgba(248,81,73,.1)',   color:'#f85149', border:'rgba(248,81,73,.2)'  },
+    manager:    { bg:'rgba(56,139,253,.1)',   color:'#388bfd', border:'rgba(56,139,253,.2)' },
+    agent:      { bg:'rgba(139,148,158,.1)', color:'#8b949e', border:'rgba(139,148,158,.2)'},
+  }
+  const RoleBadge = ({ role }) => {
+    const c = ROLE_C[role] || ROLE_C.agent
+    return <span style={{ fontSize:11, fontWeight:600, padding:'3px 10px', borderRadius:99, background:c.bg, color:c.color, border:`1px solid ${c.border}` }}>
+      {role === 'superadmin' ? 'Super Admin' : role === 'manager' ? 'Manager' : 'Agent'}
+    </span>
+  }
+
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <h1 style={S.h1}>Agents</h1>
-        <button onClick={()=>setShow(true)} style={{...S.btn,background:'#1f6feb',color:'#fff'}}>+ Add Agent</button>
+        <div>
+          <h1 style={S.h1}>Agents</h1>
+          <p style={{ fontSize:13, color:'#8b949e', marginTop:4 }}>{agents.length} team member{agents.length !== 1 ? 's' : ''}</p>
+        </div>
+        <button onClick={openAdd} style={{ ...S.btn, background:'#1f6feb', color:'#fff' }}>+ Add Agent</button>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:'14px'}}>
-        {agents.length===0&&<div style={{gridColumn:'1/-1',...S.card,padding:'48px',textAlign:'center',color:'#8b949e'}}><p style={{fontSize:'32px',marginBottom:'10px',opacity:.3}}>👤</p><p style={{fontSize:'13px'}}>No agents yet</p></div>}
-        {agents.map(a=>(
-          <div key={a.id} style={{...S.card,display:'flex',alignItems:'center',gap:'14px',padding:'16px',transition:'border-color .15s'}}
-            onMouseEnter={e=>e.currentTarget.style.borderColor='#30363d'} onMouseLeave={e=>e.currentTarget.style.borderColor='#21262d'}>
-            <div style={{width:'44px',height:'44px',borderRadius:'50%',background:'linear-gradient(135deg,#8957e5,#388bfd)',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700',color:'#fff',fontSize:'15px',flexShrink:0}}>
-              {a.avatar_initials||a.name?.[0]?.toUpperCase()||'A'}
-            </div>
-            <div style={{flex:1,minWidth:0}}>
-              <p style={{fontSize:'13px',fontWeight:'600',color:'#e6edf3'}}>{a.name}</p>
-              <p style={{fontSize:'12px',color:'#8b949e',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.email}</p>
-              <div style={{marginTop:'5px'}}>{statusBadge(a.role,ROLE)}</div>
-            </div>
-            <div style={{width:'8px',height:'8px',borderRadius:'50%',background:a.is_active?'#3fb950':'#6e7681',flexShrink:0}} title={a.is_active?'Active':'Inactive'}/>
+
+      {/* Tenant ID card */}
+      <div style={{ background:'rgba(56,139,253,.06)', border:'1px solid rgba(56,139,253,.2)', borderRadius:12, padding:'12px 18px', marginBottom:24, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
+        <div>
+          <div style={{ fontSize:11, color:'#8b949e', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:3 }}>Tenant ID — Share with agents for login</div>
+          <div style={{ fontSize:13, fontFamily:'monospace', color:'#e6edf3', wordBreak:'break-all' }}>{agents.map((itemid) => {
+            if(itemid.tenant_id){
+              return itemid.tenant_id
+            }
+          }) || '—'}</div>
+        </div>
+        <button onClick={copyTenantId} style={{ ...S.btn, background: copied ? '#238636' : '#21262d', color: copied ? '#fff' : '#e6edf3', border:'1px solid #30363d', fontSize:12 }}>
+          {copied ? '✓ Copied' : 'Copy ID'}
+        </button>
+      </div>
+
+      {/* Table */}
+      <div style={S.card}>
+        {loading ? (
+          <div style={{ padding:'48px', textAlign:'center', color:'#8b949e', fontSize:13 }}>Loading...</div>
+        ) : agents.length === 0 ? (
+          <div style={{ padding:'64px', textAlign:'center', color:'#8b949e' }}>
+            <div style={{ fontSize:40, marginBottom:12, opacity:.3 }}>👤</div>
+            <div style={{ fontSize:14, marginBottom:6 }}>No agents yet</div>
+            <div style={{ fontSize:12 }}>Click "+ Add Agent" to invite your first team member</div>
           </div>
-        ))}
-      </div>
-      {show&&(
-        <div style={S.overlay} onClick={()=>setShow(false)}>
-          <div style={{...S.modal,maxWidth:'400px'}} onClick={e=>e.stopPropagation()}>
-            <div style={S.mh}><h2 style={{fontSize:'16px',fontWeight:'600'}}>Add Agent</h2><button onClick={()=>setShow(false)} style={S.mclose}>×</button></div>
-            {error&&<div style={{background:'rgba(248,81,73,.1)',border:'1px solid rgba(248,81,73,.3)',borderRadius:'8px',padding:'10px 14px',fontSize:'12px',color:'#f85149',marginBottom:'14px'}}>{error}</div>}
-            <form onSubmit={create} style={{display:'flex',flexDirection:'column',gap:'14px'}}>
-              {[{k:'name',l:'Full name',t:'text',p:'Jane Smith'},{k:'email',l:'Email',t:'email',p:'jane@company.com'},{k:'password',l:'Password',t:'password',p:'Min 8 characters'}].map(f=>(
-                <div key={f.k}>
-                  <label style={S.label}>{f.l}</label>
-                  <input required type={f.t} value={form[f.k]} onChange={e=>setForm(p=>({...p,[f.k]:e.target.value}))} placeholder={f.p} style={S.input}
-                    onFocus={e=>e.target.style.borderColor='#388bfd'} onBlur={e=>e.target.style.borderColor='#30363d'} />
-                </div>
+        ) : (
+          <table style={S.table}>
+            <thead>
+              <tr>{['Agent','Email','Role','Status','Actions'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {agents.map(a => (
+                <tr key={a.id}
+                  onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,.02)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                  <td style={S.td}>
+                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                      <div style={{ width:34, height:34, borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg,#8957e5,#388bfd)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, color:'#fff' }}>
+                        {a.avatar_initials || a.name?.[0]?.toUpperCase() || 'A'}
+                      </div>
+                      <span style={{ fontWeight:500, color:'#e6edf3' }}>{a.name}</span>
+                    </div>
+                  </td>
+                  <td style={{ ...S.td, color:'#8b949e' }}>{a.email}</td>
+                  <td style={S.td}><RoleBadge role={a.role} /></td>
+                  <td style={S.td}>
+                    <span style={{ fontSize:13, color: a.is_active ? '#3fb950' : '#8b949e' }}>
+                      {a.is_active ? '● Active' : '● Inactive'}
+                    </span>
+                  </td>
+                  <td style={S.td}>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={() => openEdit(a)} style={{ ...S.btn, background:'#21262d', color:'#e6edf3', border:'1px solid #30363d', padding:'5px 12px', fontSize:12 }}>Edit</button>
+                      <button onClick={() => toggleActive(a)}
+                        style={{ ...S.btn, padding:'5px 12px', fontSize:12, border:'1px solid',
+                                 background:  a.is_active ? 'rgba(210,153,34,.1)' : 'rgba(63,185,80,.1)',
+                                 color:       a.is_active ? '#d29922' : '#3fb950',
+                                 borderColor: a.is_active ? 'rgba(210,153,34,.25)' : 'rgba(63,185,80,.25)' }}>
+                        {a.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button onClick={() => deleteAgent(a)} style={{ ...S.btn, background:'rgba(248,81,73,.1)', color:'#f85149', border:'1px solid rgba(248,81,73,.2)', padding:'5px 12px', fontSize:12 }}>Remove</button>
+                    </div>
+                  </td>
+                </tr>
               ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Add / Edit Modal */}
+      {show && (
+        <div style={S.overlay} onClick={closeModal}>
+          <div style={{ ...S.modal, maxWidth:440 }} onClick={e => e.stopPropagation()}>
+            <div style={S.mh}>
+              <h2 style={{ fontSize:16, fontWeight:600 }}>{editAgent ? 'Edit Agent' : 'Add Agent'}</h2>
+              <button onClick={closeModal} style={S.mclose}>×</button>
+            </div>
+            {error && <div style={{ background:'rgba(248,81,73,.1)', border:'1px solid rgba(248,81,73,.3)', borderRadius:8, padding:'10px 14px', fontSize:12, color:'#f85149', marginBottom:14 }}>{error}</div>}
+            <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+              <div>
+                <label style={S.label}>Full Name</label>
+                <input required type="text" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="Jane Smith" style={S.input} onFocus={e => e.target.style.borderColor='#388bfd'} onBlur={e => e.target.style.borderColor='#30363d'} />
+              </div>
+              <div>
+                <label style={S.label}>Email</label>
+                <input required type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                  placeholder="jane@company.com" readOnly={!!editAgent}
+                  style={{ ...S.input, opacity: editAgent ? 0.6 : 1, cursor: editAgent ? 'not-allowed' : 'text' }}
+                  onFocus={editAgent ? undefined : e => e.target.style.borderColor='#388bfd'}
+                  onBlur={editAgent ? undefined : e => e.target.style.borderColor='#30363d'} />
+              </div>
+              <div>
+                <label style={S.label}>{editAgent ? 'New Password (leave blank to keep current)' : 'Password'}</label>
+                <input required={!editAgent} type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                  placeholder={editAgent ? 'Leave blank to keep current' : 'Min 8 characters'}
+                  style={S.input} onFocus={e => e.target.style.borderColor='#388bfd'} onBlur={e => e.target.style.borderColor='#30363d'} />
+              </div>
               <div>
                 <label style={S.label}>Role</label>
-                <select value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} style={{...S.input,cursor:'pointer',appearance:'none'}}>
-                  <option value="agent">Agent</option><option value="manager">Manager</option><option value="superadmin">Superadmin</option>
+                <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))} style={{ ...S.input, cursor:'pointer', appearance:'none' }}>
+                  <option value="agent">Agent — Inbox and Contacts only</option>
+                  <option value="manager">Manager — Broadcasts, Templates, Analytics access</option>
                 </select>
+                <div style={{ fontSize:11, color:'#8b949e', marginTop:6 }}>
+                  {form.role === 'agent' ? '✅ Inbox  ✅ Contacts  ❌ Broadcasts  ❌ Templates  ❌ Analytics' : '✅ Inbox  ✅ Contacts  ✅ Broadcasts  ✅ Templates  ✅ Analytics'}
+                </div>
               </div>
               <div style={S.mfoot}>
-                <button type="button" onClick={()=>setShow(false)} style={{...S.btn,background:'#21262d',color:'#c9d1d9',border:'1px solid #30363d'}}>Cancel</button>
-                <button type="submit" disabled={saving} style={{...S.btn,background:saving?'#21262d':'#1f6feb',color:saving?'#8b949e':'#fff',cursor:saving?'not-allowed':'pointer'}}>
-                  {saving?'Adding…':'Add Agent'}
+                <button type="button" onClick={closeModal} style={{ ...S.btn, background:'#21262d', color:'#c9d1d9', border:'1px solid #30363d' }}>Cancel</button>
+                <button type="submit" disabled={saving} style={{ ...S.btn, background: saving ? '#21262d' : '#1f6feb', color: saving ? '#8b949e' : '#fff', cursor: saving ? 'not-allowed' : 'pointer' }}>
+                  {saving ? 'Saving…' : editAgent ? 'Save Changes' : 'Add Agent'}
                 </button>
               </div>
             </form>

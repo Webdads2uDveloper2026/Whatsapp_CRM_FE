@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import image1 from '../../assets/webdadslogo.svg'
+import image2 from '../../assets/webdadsicon.svg'
 
 const NAV = [
   { to:'/dashboard',            emoji:'⊞', label:'Dashboard'   },
@@ -10,6 +12,7 @@ const NAV = [
   { to:'/dashboard/templates',  emoji:'📋', label:'Templates'   },
   { to:'/dashboard/analytics',  emoji:'📊', label:'Analytics'   },
   { to:'/dashboard/automations',emoji:'⚡', label:'Automations' },
+  { to:'/dashboard/flows',      emoji:'🔀', label:'Flows'       },
   { to:'/dashboard/agents',     emoji:'👤', label:'Agents'      },
   { to:'/dashboard/settings',   emoji:'⚙️', label:'Settings'    },
 ]
@@ -28,8 +31,9 @@ export default function Layout() {
 
         {/* Logo */}
         <div style={{ display:'flex', alignItems:'center', gap:collapsed?0:'10px', justifyContent:collapsed?'center':'flex-start', padding:collapsed?'16px 0':'16px', height:'60px', borderBottom:'1px solid #21262d' }}>
-          <div style={{ width:'32px', height:'32px', borderRadius:'8px', background:'linear-gradient(135deg,#22c55e,#0d9488)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', color:'#fff', fontSize:'14px', flexShrink:0 }}>W</div>
-          {!collapsed && <span style={{ fontSize:'14px', fontWeight:'600', flex:1 }}>WA CRM</span>}
+          <div style={{ width:'32px', height:'32px', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', color:'#fff', fontSize:'14px', flexShrink:0 }}><img src={image2} alt="Logo" style={{ width:'24px', height:'24px' }} /></div>
+          {/* {!collapsed && <span style={{ fontSize:'14px', fontWeight:'600', flex:1 }}>WA CRM</span>} */}
+          {!collapsed && <img src={image1} alt="Logo" style={{ width:'100px', height:'32px' }}   /  >}
           {!collapsed && (
             <button onClick={()=>setCollapsed(true)} style={{ background:'none', border:'none', color:'#6e7681', cursor:'pointer', fontSize:'16px', padding:'2px 4px' }}>‹</button>
           )}

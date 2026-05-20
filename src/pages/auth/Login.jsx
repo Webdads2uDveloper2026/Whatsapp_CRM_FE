@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import image1 from '../../assets/webdadslogo.svg'
+import image2 from '../../assets/webdadsicon.svg'
 
 const s = {
   page: { minHeight:'100vh', background:'#0d1117', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', fontFamily:"'Inter',system-ui,sans-serif" },
@@ -41,8 +43,11 @@ export default function Login() {
     <div style={s.page}>
       <div style={s.card}>
         <div style={s.logo}>
-          <div style={s.mark}>W</div>
-          <span style={{ fontSize:'18px', fontWeight:'700', color:'#e6edf3' }}>WhatsApp CRM</span>
+          {/* <div style={s.mark}>W</div>
+          <span style={{ fontSize:'18px', fontWeight:'700', color:'#e6edf3' }}>WhatsApp CRM</span> */}
+          <img src={image2} alt="Logo" style={{ width:'40px', height:'40px'}} />
+          <img src={image1} alt="Logo" style={{ width:'100px', height:'40px' }} />
+
         </div>
 
         <div style={s.box}>

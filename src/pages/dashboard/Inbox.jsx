@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import { useInboxSocket } from '../../hooks/useInboxSocket'
 import SendTemplateModal from './SendTemplateModal'
+import SendFlowModal from './SendFlowModal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmt = iso => {
@@ -254,6 +255,8 @@ export default function Inbox() {
   const [editForm, setEditForm]       = useState({})
   const [showNewConvo, setShowNewConvo] = useState(false)
   const [showTplModal, setShowTplModal] = useState(false)
+  const [showFlowModal, setShowFlowModal] = useState(false)
+  const [flows, setFlows] = useState([])
   const [activeMenu,   setActiveMenu]   = useState(null)   // message id with open menu
   const [replyTo,      setReplyTo]      = useState(null)   // message being replied to
   const [msgInfo,      setMsgInfo]      = useState(null)   // message info modal
@@ -432,6 +435,28 @@ export default function Inbox() {
       return exists ? p : [...p, data]
     })
     setShowTemplates(false)
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 60)
+    loadConvos()
+  }
+
+  const handleOpenFlowModal = async () => {
+    // Load published flows for the picker (falls back to empty list gracefully)
+    try {
+      const { data } = await api.get('/flows')
+      setFlows(data?.flows || data || [])
+    } catch {
+      setFlows([])
+    }
+    setShowFlowModal(true)
+  }
+
+  const handleSendFlow = async payload => {
+    if (!selected) return
+    const { data } = await api.post(`/conversations/${selected.id}/messages`, payload)
+    setMessages(p => {
+      const exists = p.some(m => m.id === data.id)
+      return exists ? p : [...p, data]
+    })
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 60)
     loadConvos()
   }
@@ -1033,6 +1058,13 @@ export default function Inbox() {
                   <path d="M3 4h14v2H3zM3 8h10v2H3zM3 12h8v2H3z"/>
                 </svg>
               </button>
+              <button onClick={handleOpenFlowModal}
+                className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/20 hover:border-emerald-700/50 transition-colors shrink-0"
+                title="Send Flow">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                  <path fillRule="evenodd" d="M3 5a1 1 0 000 2h11.586l-2.293 2.293a1 1 0 101.414 1.414l4-4a1 1 0 000-1.414l-4-4a1 1 0 10-1.414 1.414L14.586 4H3a1 1 0 00-1 1zm14 9a1 1 0 100-2H5.414l2.293-2.293a1 1 0 10-1.414-1.414l-4 4a1 1 0 000 1.414l4 4a1 1 0 101.414-1.414L5.414 15H17a1 1 0 001-1z" clipRule="evenodd"/>
+                </svg>
+              </button>
               <textarea ref={inputRef} rows={1} value={text}
                 onChange={e => setText(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText() } }}
@@ -1250,6 +1282,14 @@ export default function Inbox() {
         <SendTemplateModal
           onClose={() => setShowTplModal(false)}
           onSend={handleSendTemplate}
+        />
+      )}
+
+      {showFlowModal && selected && (
+        <SendFlowModal
+          flows={flows}
+          onClose={() => setShowFlowModal(false)}
+          onSend={handleSendFlow}
         />
       )}
 
