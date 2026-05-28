@@ -272,7 +272,6 @@ export default function Onboarding() {
               code,
               waba_id,
               phone_number_id,
-              redirect_uri: window.location.href.split('?')[0],
             })
             finishProcessing(true)
             // Brief pause so user sees all steps turn green before navigating
