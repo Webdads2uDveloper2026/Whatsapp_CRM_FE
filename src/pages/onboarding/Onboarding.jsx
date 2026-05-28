@@ -274,7 +274,6 @@ export default function Onboarding() {
               phone_number_id,
             })
             finishProcessing(true)
-            // Brief pause so user sees all steps turn green before navigating
             await new Promise(r => setTimeout(r, 900))
             setResult(data)
             setStep(3)
@@ -290,7 +289,6 @@ export default function Onboarding() {
         setError('Permission denied. Please allow all required permissions and try again.')
       } else {
         setConnecting(false)
-        // 'unknown' usually means the user closed the popup — don't show an error
         if (response.status !== 'unknown') {
           setError('Facebook login was not completed. Please try again.')
         }
@@ -300,9 +298,9 @@ export default function Onboarding() {
       response_type:                  'code',
       override_default_response_type: true,
       extras: {
-        sessionInfoVersion: 3,   // matches Session Info Version in Meta Embedded Signup Builder
-        featureType:        '',  // must be empty string — "None" in Meta Builder
-        setup:              {},  // reserved for pre-fill; empty = standard flow
+        sessionInfoVersion: 3,
+        featureType:        '',
+        setup:              {},
       },
     })
   }
