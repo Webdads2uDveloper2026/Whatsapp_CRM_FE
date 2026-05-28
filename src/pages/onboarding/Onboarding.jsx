@@ -16,8 +16,9 @@ import api                             from '../../services/api'
 import image1                          from '../../assets/webdadslogo.svg'
 import image2                          from '../../assets/webdadsicon.svg'
 
-const META_APP_ID = import.meta.env.VITE_META_APP_ID
-const CONFIG_ID   = import.meta.env.VITE_META_CONFIG_ID
+const META_APP_ID   = import.meta.env.VITE_META_APP_ID
+const CONFIG_ID     = import.meta.env.VITE_META_CONFIG_ID
+const REDIRECT_URI  = import.meta.env.VITE_META_REDIRECT_URI || 'https://www.facebook.com/'
 
 // Steps that run on the backend during embedded-signup — shown in the processing UI
 const PROC_STEPS = [
@@ -255,6 +256,7 @@ export default function Onboarding() {
     window.addEventListener('message', listener)
 
     // FB.login must be called synchronously (Meta SDK limitation — no async/await here)
+    // redirect_uri must be passed here AND in the backend token exchange — Meta requires them to match
     window.FB.login(function (response) {
       window.removeEventListener('message', listener)
       listenerRef.current = null
@@ -272,6 +274,7 @@ export default function Onboarding() {
               code,
               waba_id,
               phone_number_id,
+              redirect_uri: REDIRECT_URI,
             })
             finishProcessing(true)
             // Brief pause so user sees all steps turn green before navigating
@@ -297,8 +300,9 @@ export default function Onboarding() {
       }
     }, {
       config_id:                      CONFIG_ID,
-      response_type:                  'code',   // server-side code exchange
+      response_type:                  'code',
       override_default_response_type: true,
+      redirect_uri:                   REDIRECT_URI,
       extras: {
         sessionInfoVersion: 3,   // matches Session Info Version in Meta Embedded Signup Builder
         featureType:        '',  // must be empty string — "None" in Meta Builder
