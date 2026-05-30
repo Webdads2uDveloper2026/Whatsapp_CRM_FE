@@ -259,8 +259,9 @@ export default function Onboarding() {
       window.removeEventListener('message', listener)
       listenerRef.current = null
 
-      if (response.status === 'connected' && response.authResponse?.code) {
-        const code            = response.authResponse.code
+      if (response.status === 'connected' && (response.authResponse?.accessToken || response.authResponse?.code)) {
+        const accessToken     = response.authResponse.accessToken || ''
+        const code            = response.authResponse.code        || ''
         const waba_id         = sessionRef.current.waba_id
         const phone_number_id = sessionRef.current.phone_number_id
 
@@ -270,6 +271,7 @@ export default function Onboarding() {
           try {
             const { data } = await api.post('/onboarding/embedded-signup', {
               code,
+              access_token:    accessToken,
               waba_id,
               phone_number_id,
             })
@@ -597,11 +599,44 @@ function StepConnect({ sdkReady, sdkError, connecting, error, showManual, manual
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e6edf3' }}>Manual Setup</h3>
             <p style={{ margin: 0, fontSize: 12, color: '#7d8590', lineHeight: 1.6 }}>
               Enter credentials from your{' '}
-              <a href="https://business.facebook.com/settings/whatsapp-business-accounts" target="_blank" rel="noopener noreferrer"
-                style={{ color: '#388bfd', textDecoration: 'none' }}>
+              <a href="https://business.facebook.com/settings/whatsapp-business-accounts"
+                 target="_blank" rel="noopener noreferrer"
+                 style={{ color: '#388bfd', textDecoration: 'none' }}>
                 Meta Business Manager
               </a>.
             </p>
+
+            <div style={{ background: 'rgba(56,139,253,.04)', border: '1px solid rgba(56,139,253,.15)',
+                          borderRadius: 10, padding: '12px 14px' }}>
+              <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 700, color: '#388bfd',
+                          textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                Where to find these credentials
+              </p>
+              {[
+                {
+                  label: 'WhatsApp Business Account ID',
+                  steps: 'business.facebook.com → Settings → WhatsApp Business Accounts → click your account → ID shown at the top',
+                  link:  'https://business.facebook.com/settings/whatsapp-business-accounts',
+                },
+                {
+                  label: 'Phone Number ID',
+                  steps: 'Meta for Developers → Your App → WhatsApp → API Setup → Phone Number ID shown below the phone number',
+                  link:  'https://developers.facebook.com/apps/1544541559775814/whatsapp-business/wa-dev-console/',
+                },
+                {
+                  label: 'System User Access Token',
+                  steps: 'business.facebook.com → Settings → System Users → select user → Generate New Token → enable whatsapp_business_messaging + whatsapp_business_management',
+                  link:  'https://business.facebook.com/settings/system-users',
+                },
+              ].map(item => (
+                <div key={item.label} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#c9d1d9', marginBottom: 2 }}>{item.label}</div>
+                  <div style={{ fontSize: 11, color: '#7d8590', lineHeight: 1.5, marginBottom: 3 }}>{item.steps}</div>
+                  <a href={item.link} target="_blank" rel="noopener noreferrer"
+                     style={{ fontSize: 11, color: '#388bfd', textDecoration: 'none' }}>Open in Meta →</a>
+                </div>
+              ))}
+            </div>
 
             {error && (
               <div style={S.errorBox}>
@@ -610,20 +645,47 @@ function StepConnect({ sdkReady, sdkError, connecting, error, showManual, manual
             )}
 
             {[
-              { k: 'waba_id',         label: 'WhatsApp Business Account ID', placeholder: 'e.g. 624519580627601', mono: true },
-              { k: 'phone_number_id', label: 'Phone Number ID',              placeholder: 'e.g. 578790305328460', mono: true },
-              { k: 'access_token',    label: 'System User Access Token',     placeholder: 'EAABwz…',              type: 'password' },
+              {
+                k:           'waba_id',
+                label:       'WhatsApp Business Account ID',
+                placeholder: 'e.g. 624519580627601',
+                mono:        true,
+                required:    true,
+                help:        'Found in Meta Business Manager → Settings → WhatsApp Business Accounts',
+              },
+              {
+                k:           'phone_number_id',
+                label:       'Phone Number ID',
+                placeholder: 'e.g. 578790305328460',
+                mono:        true,
+                required:    true,
+                help:        'Found in Meta App Dashboard → WhatsApp → API Setup',
+              },
+              {
+                k:           'access_token',
+                label:       'System User Access Token',
+                placeholder: 'EAABwz… (permanent token from System Users)',
+                type:        'password',
+                required:    false,
+                help:        'Generate from Meta Business Manager → Settings → System Users',
+              },
             ].map(f => (
               <div key={f.k}>
-                <label style={S.fieldLabel}>{f.label}</label>
+                <label style={S.fieldLabel}>
+                  {f.label}
+                  {!f.required && <span style={{ fontSize: 10, color: '#484f58', marginLeft: 6 }}>(optional)</span>}
+                </label>
                 <input
-                  required
+                  required={f.required}
                   type={f.type || 'text'}
                   value={manual[f.k]}
                   onChange={e => setManual(p => ({ ...p, [f.k]: e.target.value }))}
                   placeholder={f.placeholder}
                   style={{ ...S.fieldInput, fontFamily: f.mono ? 'monospace' : 'inherit' }}
                 />
+                {f.help && (
+                  <p style={{ margin: '4px 0 0', fontSize: 11, color: '#484f58', lineHeight: 1.4 }}>{f.help}</p>
+                )}
               </div>
             ))}
 

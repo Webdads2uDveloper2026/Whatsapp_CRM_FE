@@ -247,6 +247,7 @@ export default function Inbox() {
   const [statusFilter, setStatusFilter] = useState('open')
   const [text, setText]               = useState('')
   const [sending, setSending]         = useState(false)
+  const [uploadingMedia, setUploadingMedia] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [templates, setTemplates]     = useState([])
   const [agents, setAgents]           = useState([])
@@ -262,9 +263,11 @@ export default function Inbox() {
   const [msgInfo,      setMsgInfo]      = useState(null)   // message info modal
   const [showRight, setShowRight]     = useState(true)
 
-  const bottomRef = useRef(null)
-  const chatRef   = useRef(null)
-  const inputRef  = useRef(null)
+  const bottomRef   = useRef(null)
+  const chatRef     = useRef(null)
+  const inputRef    = useRef(null)
+  const fileInputRef = useRef(null)
+  const selectedRef = useRef(null)   // stable ref — avoids WS handler recreation
 
   // ── Load conversations ──────────────────────────────────────────────────
   const loadConvos = useCallback(() => {
@@ -274,6 +277,9 @@ export default function Inbox() {
   }, [statusFilter, search])
 
   useEffect(() => { loadConvos() }, [loadConvos])
+
+  // Keep selectedRef in sync without triggering WS reconnects
+  useEffect(() => { selectedRef.current = selected }, [selected])
 
   // ── Load messages ───────────────────────────────────────────────────────
   const loadMessages = useCallback(async (cid, pg = 1, prepend = false) => {
@@ -363,17 +369,37 @@ export default function Inbox() {
   const navState = location.state
 
   // ── WebSocket ───────────────────────────────────────────────────────────
+  // Empty deps + refs so this callback never recreates → no WS reconnects
   const onWsMessage = useCallback(ev => {
     if (ev.type === 'new_message') {
-      loadConvos()
-      if (selected?.id === ev.conversation_id) {
+      const curSelected = selectedRef.current
+
+      // Update conversation list in-place (no API call needed)
+      setConvos(prev => {
+        const idx = prev.findIndex(c => c.id === ev.conversation_id)
+        if (idx === -1) {
+          // Unknown conversation — schedule a full reload and leave list unchanged
+          setTimeout(() => loadConvos(), 0)
+          return prev
+        }
+        const isOpen = curSelected?.id === ev.conversation_id
+        const updated = {
+          ...prev[idx],
+          last_message_at: ev.message?.created_at || new Date().toISOString(),
+          unread_count: isOpen ? 0 : (prev[idx].unread_count || 0) + 1,
+        }
+        // Move to top of list
+        return [updated, ...prev.filter((_, i) => i !== idx)]
+      })
+
+      // Append message to open chat
+      if (curSelected?.id === ev.conversation_id) {
         setMessages(p => {
-          // Dedup by id AND by wa_message_id to prevent doubles
           const msgId   = ev.message?.id
           const waMsgId = ev.message?.wa_message_id
           const exists  = p.some(m =>
-            (msgId   && m.id           === msgId)   ||
-            (waMsgId && m.wa_message_id === waMsgId) ||
+            (msgId   && m.id            === msgId)   ||
+            (waMsgId && m.wa_message_id  === waMsgId) ||
             (waMsgId && m.content?.wa_message_id === waMsgId)
           )
           if (exists) return p
@@ -382,12 +408,13 @@ export default function Inbox() {
         setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 60)
       }
     }
+
     if (ev.type === 'status_update') {
       setMessages(p => p.map(m =>
         m.wa_message_id === ev.wa_message_id ? { ...m, status: ev.status } : m
       ))
     }
-  }, [selected, loadConvos])
+  }, [])  // ← empty deps: uses selectedRef + setConvos/setMessages (stable setters)
 
   useInboxSocket(onWsMessage)
 
@@ -398,6 +425,32 @@ export default function Inbox() {
   }, [])
 
   // ── Send message ────────────────────────────────────────────────────────
+  const handleFileAttachment = async e => {
+    const file = e.target.files?.[0]
+    if (!file || !selected) return
+    setUploadingMedia(true)
+    try {
+      const fileType = file.type.startsWith('image/') ? 'image'
+                     : file.type.startsWith('video/') ? 'video'
+                     : file.type.startsWith('audio/') ? 'audio'
+                     : 'document'
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('type', fileType)
+      const uploadRes = await api.post('/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const mediaId = uploadRes.data.id
+      const msgPayload = { msg_type: fileType, media_id: mediaId }
+      // filename only for documents; caption omitted (empty = WhatsApp error)
+      if (fileType === 'document') msgPayload.filename = file.name
+      await api.post(`/conversations/${selected.id}/messages`, msgPayload)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Upload failed')
+    } finally {
+      setUploadingMedia(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const sendText = async e => {
     e?.preventDefault()
     if (!text.trim() || !selected || sending) return
@@ -636,63 +689,106 @@ export default function Inbox() {
         case 'text':
           return <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words">{c.body || ''}</p>
 
-        case 'image':
+        case 'image': {
+          const mediaId  = c.id || c.image?.id || c.url
+          const _tok     = localStorage.getItem('access_token') || ''
+          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
           return (
             <div>
-              <div className="w-full max-w-[220px] bg-slate-700 rounded-xl overflow-hidden mb-1.5 flex items-center justify-center" style={{minHeight:120}}>
-                <div className="flex flex-col items-center gap-1 p-4 text-slate-400">
+              {proxyUrl ? (
+                <>
+                  <img
+                    src={proxyUrl}
+                    alt={c.caption || 'Image'}
+                    className="rounded-xl max-w-[220px] w-full object-cover cursor-pointer"
+                    style={{ maxHeight:280, minHeight:80, display:'block' }}
+                    onClick={() => window.open(proxyUrl, '_blank')}
+                    onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }}
+                  />
+                  <div className="w-full max-w-[220px] bg-slate-700 rounded-xl items-center justify-center p-4" style={{minHeight:80,display:'none'}}>
+                    <span className="text-3xl">🖼️</span>
+                  </div>
+                </>
+              ) : (
+                <div className="w-full max-w-[220px] bg-slate-700 rounded-xl flex items-center justify-center p-4" style={{minHeight:80}}>
                   <span className="text-3xl">🖼️</span>
-                  <span className="text-[10px]">Image</span>
-                  {c.mime_type && <span className="text-[9px] font-mono text-slate-500">{c.mime_type}</span>}
                 </div>
-              </div>
+              )}
               {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
             </div>
           )
+        }
 
-        case 'video':
+        case 'video': {
+          const mediaId  = c.id || c.video?.id || c.url
+          const _tok     = localStorage.getItem('access_token') || ''
+          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
           return (
             <div>
-              <div className="w-full max-w-[220px] bg-slate-900 rounded-xl overflow-hidden mb-1.5 flex items-center justify-center" style={{minHeight:100}}>
-                <div className="flex flex-col items-center gap-1 p-4 text-slate-400">
+              {proxyUrl ? (
+                <video controls className="rounded-xl max-w-[220px] w-full" style={{maxHeight:280}}>
+                  <source src={proxyUrl} type={c.mime_type || 'video/mp4'} />
+                </video>
+              ) : (
+                <div className="w-full max-w-[220px] bg-slate-900 rounded-xl flex items-center justify-center p-4" style={{minHeight:100}}>
                   <span className="text-3xl">🎥</span>
-                  <span className="text-[10px]">Video</span>
                 </div>
-              </div>
+              )}
               {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
             </div>
           )
+        }
 
-        case 'audio':
+        case 'audio': {
+          const mediaId  = c.id || c.audio?.id || c.url
+          const _tok     = localStorage.getItem('access_token') || ''
+          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
           return (
-            <div className="flex items-center gap-2 px-1 min-w-[160px]">
-              <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center shrink-0">
-                <span>{c.voice ? '🎤' : '🎵'}</span>
+            <div className="min-w-[200px] max-w-[260px]">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center shrink-0">
+                  <span>{c.voice ? '🎤' : '🎵'}</span>
+                </div>
+                <span className="text-[11px] text-slate-400">{c.voice ? 'Voice message' : 'Audio'}</span>
               </div>
-              <div className="flex-1">
+              {proxyUrl ? (
+                <audio controls style={{width:'100%', height:36}}>
+                  <source src={proxyUrl} type={c.mime_type || 'audio/ogg'} />
+                </audio>
+              ) : (
                 <div className="flex items-center gap-0.5 h-5">
                   {[3,5,4,7,5,3,6,4,5,3,4,6].map((h,i) => (
                     <div key={i} className="w-1 bg-slate-500 rounded-full" style={{height:h*3}}/>
                   ))}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-0.5">{c.voice ? 'Voice message' : 'Audio'}</p>
-              </div>
+              )}
             </div>
           )
+        }
 
-        case 'document':
+        case 'document': {
+          const mediaId  = c.id || c.document?.id || c.url
+          const _tok     = localStorage.getItem('access_token') || ''
+          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
           return (
-            <div className="flex items-center gap-3 bg-black/20 rounded-xl p-2.5 min-w-[160px] max-w-[220px]">
+            <div className="flex items-center gap-3 bg-black/20 rounded-xl p-2.5 min-w-[180px] max-w-[240px]">
               <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
                 <span className="text-lg">📄</span>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[12px] font-medium text-slate-200 truncate">{c.filename || 'Document'}</p>
                 <p className="text-[10px] text-slate-400">{c.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}</p>
-                {c.caption && <p className="text-[10px] text-slate-300 mt-0.5">{c.caption}</p>}
+                {c.caption && <p className="text-[10px] text-slate-300 mt-0.5 truncate">{c.caption}</p>}
+                {proxyUrl && (
+                  <a href={proxyUrl} download={c.filename || 'document'} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 block">
+                    ⬇ Download
+                  </a>
+                )}
               </div>
             </div>
           )
+        }
 
         case 'sticker':
           return (
@@ -758,6 +854,31 @@ export default function Inbox() {
               )}
             </div>
           )
+
+        case 'flow_response': {
+          const entries = Object.entries(c.flow_data || {}).filter(([k]) => k !== 'flow_token')
+          return (
+            <div className="min-w-[200px] max-w-[280px]">
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="text-[10px] font-bold text-purple-400 bg-purple-400/10 border border-purple-400/20 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  📋 {c.flow_name || 'Flow'} Response
+                </span>
+              </div>
+              {entries.length > 0 ? (
+                <div className="space-y-1">
+                  {entries.map(([key, value]) => (
+                    <div key={key} className="flex gap-2 text-[11px]">
+                      <span className="text-slate-400 shrink-0 capitalize">{key.replace(/_/g,' ')}:</span>
+                      <span className="text-slate-200 break-words">{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12px] text-slate-300">{c.body || 'Form submitted'}</p>
+              )}
+            </div>
+          )
+        }
 
         default:
           return <p className="text-[13.5px] text-slate-300">{c.body || `[${type}]`}</p>
@@ -1051,6 +1172,22 @@ export default function Inbox() {
 
             {/* Composer */}
             <div className="flex items-end gap-2 px-4 py-3 border-t border-slate-800 bg-slate-950/80 shrink-0">
+              {/* Hidden file input */}
+              <input ref={fileInputRef} type="file" className="hidden"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                onChange={handleFileAttachment}
+              />
+              {/* Attachment button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingMedia}
+                className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 hover:border-amber-700/50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Send image, video, audio or document">
+                {uploadingMedia
+                  ? <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".25"/><path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                  : <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd"/></svg>
+                }
+              </button>
               <button onClick={() => setShowTplModal(true)}
                 className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400 hover:bg-blue-900/20 hover:border-blue-700/50 transition-colors shrink-0"
                 title="Send Template">

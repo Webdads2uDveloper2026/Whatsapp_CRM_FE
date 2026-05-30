@@ -7,6 +7,9 @@ export function useInboxSocket(onMessage, enabled = true) {
   const retry   = useRef(0)
   const timer   = useRef(null)
   const mounted = useRef(true)
+  // Stable ref so changing the handler never causes a reconnect
+  const cbRef   = useRef(onMessage)
+  useEffect(() => { cbRef.current = onMessage }, [onMessage])
 
   const connect = useCallback(() => {
     if (!mounted.current || !enabled) return
@@ -15,11 +18,11 @@ export function useInboxSocket(onMessage, enabled = true) {
 
     ws.current = new WebSocket(`${WS_BASE}/ws/inbox?token=${token}`)
 
-    ws.current.onopen  = () => { retry.current = 0 }
+    ws.current.onopen = () => { retry.current = 0 }
     ws.current.onmessage = e => {
       try {
         const d = JSON.parse(e.data)
-        if (d.type !== 'ping' && d.type !== 'connected') onMessage(d)
+        if (d.type !== 'ping' && d.type !== 'connected') cbRef.current(d)
       } catch {}
     }
     ws.current.onclose = ev => {
@@ -33,7 +36,7 @@ export function useInboxSocket(onMessage, enabled = true) {
       timer.current = setTimeout(connect, delay)
     }
     ws.current.onerror = () => ws.current?.close()
-  }, [enabled, onMessage])
+  }, [enabled])   // ← no longer depends on onMessage → no reconnect on handler change
 
   useEffect(() => {
     mounted.current = true

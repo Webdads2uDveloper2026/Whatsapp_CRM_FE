@@ -4,7 +4,7 @@
  */
 import { useState } from 'react'
 
-const uid = () => Math.random().toString(36).slice(2, 9)
+const uid = () => { const c='abcdefghijklmnopqrstuvwxyz'; let r=''; for(let i=0;i<8;i++) r+=c[Math.floor(Math.random()*26)]; return r }
 
 // ── Field helpers ──────────────────────────────────────────────────────────────
 function Field({ label, hint, children }) {
@@ -46,10 +46,14 @@ export default function SendFlowModal({ onClose, onSend, flows = [] }) {
 
   // Pick a flow from the list → pre-fill form
   const pickFlow = (flow) => {
+    if (!flow.meta_flow_id) {
+      setError('This flow has no Meta flow ID — publish it on Meta first before sending.')
+      return
+    }
     setSelectedFlow(flow)
     setForm(p => ({
       ...p,
-      flow_id:     flow.meta_flow_id || flow.id || '',
+      flow_id:     flow.meta_flow_id,
       flow_screen: flow.screens?.[0]?.id || '',
     }))
     setStep('compose')
@@ -58,6 +62,7 @@ export default function SendFlowModal({ onClose, onSend, flows = [] }) {
   const handleSend = async () => {
     setError('')
     if (!form.flow_id.trim()) { setError('Meta Flow ID is required'); return }
+    if (!/^\d+$/.test(form.flow_id.trim())) { setError('Invalid Meta Flow ID — must be a numeric ID from your Meta dashboard.'); return }
     if (!form.flow_body.trim()) { setError('Body text is required'); return }
     setSending(true)
     try {
@@ -112,17 +117,23 @@ export default function SendFlowModal({ onClose, onSend, flows = [] }) {
           {step === 'pick' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {publishedFlows.length > 0 ? (
-                publishedFlows.map(flow => (
+                publishedFlows.map(flow => {
+                  const hasMetaId = !!flow.meta_flow_id
+                  return (
                   <button
                     key={flow.id}
                     onClick={() => pickFlow(flow)}
+                    disabled={!hasMetaId}
+                    title={hasMetaId ? '' : 'No Meta flow ID — republish this flow first'}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '12px 14px', borderRadius: 12,
                       background: 'rgba(255,255,255,.03)', border: '1px solid #21262d',
-                      cursor: 'pointer', textAlign: 'left', transition: 'border-color .15s, background .15s', fontFamily: 'inherit',
+                      cursor: hasMetaId ? 'pointer' : 'not-allowed',
+                      opacity: hasMetaId ? 1 : 0.45,
+                      textAlign: 'left', transition: 'border-color .15s, background .15s', fontFamily: 'inherit',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(56,139,253,.08)'; e.currentTarget.style.borderColor = 'rgba(56,139,253,.3)' }}
+                    onMouseEnter={e => { if (hasMetaId) { e.currentTarget.style.background = 'rgba(56,139,253,.08)'; e.currentTarget.style.borderColor = 'rgba(56,139,253,.3)' } }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,.03)'; e.currentTarget.style.borderColor = '#21262d' }}
                   >
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(56,139,253,.12)', border: '1px solid rgba(56,139,253,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
@@ -132,13 +143,15 @@ export default function SendFlowModal({ onClose, onSend, flows = [] }) {
                       <p style={{ fontSize: 13, fontWeight: 600, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{flow.name}</p>
                       <p style={{ fontSize: 11, color: '#6e7681', marginTop: 2 }}>
                         {flow.category?.replace(/_/g, ' ')} · {flow.screens?.length || 0} screen{flow.screens?.length !== 1 ? 's' : ''}
+                        {!hasMetaId && ' · No Meta ID'}
                       </p>
                     </div>
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#3fb950', background: 'rgba(63,185,80,.12)', border: '1px solid rgba(63,185,80,.25)', padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>
                       PUBLISHED
                     </span>
                   </button>
-                ))
+                  )
+                })
               ) : (
                 <div style={{ textAlign: 'center', padding: '32px 0', color: '#6e7681' }}>
                   <p style={{ fontSize: 28, opacity: .3 }}>🔀</p>
@@ -235,16 +248,13 @@ export default function SendFlowModal({ onClose, onSend, flows = [] }) {
                 />
               </Field>
 
-              <Field label="First screen ID" hint="Optional — leave blank to use the flow's default entry screen">
-                <input
-                  value={form.flow_screen}
-                  onChange={set('flow_screen')}
-                  style={inputStyle}
-                  placeholder="e.g. WELCOME (auto-detected if blank)"
-                  onFocus={e => e.target.style.borderColor = '#388bfd'}
-                  onBlur={e => e.target.style.borderColor = '#334155'}
-                />
-              </Field>
+              {/* First screen — auto-mapped by backend, no user input needed */}
+              {form.flow_screen && (
+                <div style={{ fontSize: 10, color: '#484f58', padding: '4px 0' }}>
+                  Entry screen: <code style={{ color: '#6e7681' }}>{form.flow_screen}</code>
+                  <span style={{ marginLeft: 6, color: '#3fb950' }}>→ auto-mapped to SCREEN_A</span>
+                </div>
+              )}
 
               {/* Preview card */}
               <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '12px 14px' }}>

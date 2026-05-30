@@ -7,7 +7,13 @@ import api from '../../services/api'
 import FlowCanvas from './FlowCanvas'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const uid = () => Math.random().toString(36).slice(2, 9)
+// Meta WhatsApp Flows: all id fields must be letters + underscores only — no numbers
+const uid = () => {
+  const chars = 'abcdefghijklmnopqrstuvwxyz'
+  let r = ''
+  for (let i = 0; i < 8; i++) r += chars[Math.floor(Math.random() * chars.length)]
+  return r
+}
 const fmt = iso => iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -591,21 +597,23 @@ function validateFlow(flow) {
   const errs = []
   if (!flow.name?.trim()) errs.push('Flow name is required')
   if (!flow.screens?.length) errs.push('Flow must have at least one screen')
+  const screenIds = new Set((flow.screens || []).map(s => s.id))
   flow.screens?.forEach((scr, si) => {
     if (!scr.title?.trim()) errs.push(`Screen ${si+1} needs a title`)
     if (!scr.components?.length) errs.push(`Screen "${scr.title||si+1}" has no components`)
     scr.components?.forEach(comp => {
-      if (comp.type==='buttons') {
-        comp.buttons?.forEach(btn => {
-          if (btn.action==='NAVIGATE' && !btn.next_screen) {
-            errs.push(`Button "${btn.label}" in screen "${scr.title}" has no target screen`)
-          }
-        })
-      }
+      const btns = comp.type === 'buttons' ? comp.buttons :
+                   comp.type === 'footer'  ? comp.buttons : []
+      btns?.forEach(btn => {
+        if (btn.action === 'NAVIGATE' && !btn.next_screen) {
+          errs.push(`Button "${btn.label}" in "${scr.title}" has no target screen`)
+        }
+        if (btn.action === 'NAVIGATE' && btn.next_screen && !screenIds.has(btn.next_screen)) {
+          errs.push(`Button "${btn.label}" in "${scr.title}" points to a deleted screen — update or remove it`)
+        }
+      })
     })
   })
-  const hasTerminal = flow.screens?.some(s => s.is_terminal)
-  if (!hasTerminal) errs.push('At least one screen must be marked as terminal (end of flow)')
   return errs
 }
 
@@ -614,8 +622,9 @@ function SendToContactsModal({ flow, onClose, showToast }) {
   const [contacts, setContacts] = useState([])
   const [tags, setTags]         = useState([])
   const [loading, setLoading]   = useState(true)
+  const [loadErr, setLoadErr]   = useState('')
   const [sending, setSending]   = useState(false)
-  const [mode, setMode]         = useState('contacts') // contacts | tags | all
+  const [mode, setMode]         = useState('contacts')
   const [selectedIds, setSelectedIds] = useState([])
   const [selectedTags, setSelectedTags] = useState([])
   const [search, setSearch]     = useState('')
@@ -623,22 +632,37 @@ function SendToContactsModal({ flow, onClose, showToast }) {
     flow_cta: 'Open', flow_header: '', flow_body: 'Tap the button below to get started.', flow_footer: '',
   })
 
-  useEffect(() => {
-    api.get('/contacts?limit=200').then(r => {
-      const list = r.data?.contacts || r.data || []
+  const loadContacts = async (q = '') => {
+    setLoading(true)
+    setLoadErr('')
+    try {
+      // max limit is 100 — use backend search for filtering
+      const params = q ? `?limit=100&search=${encodeURIComponent(q)}` : '?limit=100'
+      const r = await api.get(`/contacts${params}`)
+      const list = r.data?.contacts || []
       setContacts(list)
-      const allTags = [...new Set(list.flatMap(c => c.tags || []))]
-      setTags(allTags)
-    }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+      if (!q) {
+        const allTags = [...new Set(list.flatMap(c => c.tags || []))]
+        setTags(allTags)
+      }
+    } catch (e) {
+      setLoadErr('Failed to load contacts — ' + (e?.response?.data?.detail || e.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadContacts() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // debounced backend search
+  useEffect(() => {
+    const t = setTimeout(() => loadContacts(search), 300)
+    return () => clearTimeout(t)
+  }, [search]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleId = id => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleTag = t => setSelectedTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
-
-  const filteredContacts = contacts.filter(c =>
-    !search || (c.profile_name||c.wa_id||'').toLowerCase().includes(search.toLowerCase())
-  )
 
   const handleSend = async () => {
     if (mode === 'contacts' && !selectedIds.length) { showToast('Select at least one contact', 'error'); return }
@@ -654,8 +678,13 @@ function SendToContactsModal({ flow, onClose, showToast }) {
         flow_screen: flow.screens?.[0]?.id || '',
       }
       const { data } = await api.post(`/flows/${flow.id}/send`, payload)
-      showToast(`Sent to ${data.sent} contact${data.sent !== 1 ? 's' : ''}${data.failed ? ` (${data.failed} failed)` : ''}`)
-      onClose()
+      if (data.sent > 0) {
+        showToast(`Sent to ${data.sent} contact${data.sent !== 1 ? 's' : ''}${data.failed ? ` (${data.failed} failed)` : ''}`)
+        onClose()
+      } else {
+        const firstErr = data.errors?.[0]?.error || 'Unknown error'
+        showToast(`Send failed: ${firstErr}`, 'error')
+      }
     } catch (err) {
       showToast(err?.response?.data?.detail || 'Send failed', 'error')
     } finally {
@@ -663,7 +692,7 @@ function SendToContactsModal({ flow, onClose, showToast }) {
     }
   }
 
-  const iStyle = { width:'100%', background:'#1e293b', border:'1px solid #334155', color:'#e2e8f0', fontSize:12, borderRadius:8, padding:'7px 10px', outline:'none', boxSizing:'border-box', fontFamily:'inherit' }
+  const iStyle = { width:'100%', background:'#0d1117', border:'1px solid #30363d', color:'#e6edf3', fontSize:12, borderRadius:8, padding:'8px 11px', outline:'2px solid transparent', outlineOffset:0, boxSizing:'border-box', fontFamily:'inherit', transition:'border-color .15s, outline .15s' }
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:60, padding:16, backdropFilter:'blur(4px)' }} onClick={onClose}>
@@ -693,19 +722,33 @@ function SendToContactsModal({ flow, onClose, showToast }) {
           {/* Contacts picker */}
           {mode === 'contacts' && (
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search contacts…" style={iStyle} />
-              <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:2 }}>
-                {loading ? <p style={{ fontSize:12, color:'#6e7681', textAlign:'center', padding:'16px 0' }}>Loading…</p> :
-                  filteredContacts.map(c => (
-                    <label key={c.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderRadius:8, cursor:'pointer', background: selectedIds.includes(c.id) ? 'rgba(56,139,253,.1)' : 'transparent' }}>
-                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleId(c.id)} style={{ accentColor:'#388bfd' }} />
-                      <span style={{ fontSize:12, color:'#c9d1d9' }}>{c.profile_name || c.wa_id}</span>
-                      <span style={{ fontSize:10, color:'#6e7681', marginLeft:'auto' }}>{c.wa_id}</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search contacts…"
+                style={{ ...iStyle, outline:'2px solid transparent', transition:'outline .15s' }}
+                onFocus={e => e.target.style.outline='2px solid #388bfd'}
+                onBlur={e => e.target.style.outline='2px solid transparent'}
+              />
+              <div style={{ maxHeight:180, overflowY:'auto', display:'flex', flexDirection:'column', gap:2, border:'1px solid #21262d', borderRadius:8, padding:4 }}>
+                {loading
+                  ? <p style={{ fontSize:12, color:'#6e7681', textAlign:'center', padding:'16px 0' }}>Loading…</p>
+                  : loadErr
+                  ? <p style={{ fontSize:12, color:'#f85149', padding:'8px', textAlign:'center' }}>{loadErr}</p>
+                  : contacts.length === 0
+                  ? <p style={{ fontSize:12, color:'#6e7681', textAlign:'center', padding:'16px 0' }}>
+                      {search ? 'No contacts match your search' : 'No contacts found'}
+                    </p>
+                  : contacts.map(c => (
+                    <label key={c.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderRadius:6, cursor:'pointer', background: selectedIds.includes(c.id) ? 'rgba(56,139,253,.1)' : 'transparent' }}>
+                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={() => toggleId(c.id)} style={{ accentColor:'#388bfd', flexShrink:0 }} />
+                      <span style={{ fontSize:12, color:'#c9d1d9', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.profile_name || c.wa_id}</span>
+                      <span style={{ fontSize:10, color:'#6e7681', flexShrink:0 }}>{c.wa_id}</span>
                     </label>
                   ))
                 }
               </div>
-              {selectedIds.length > 0 && <p style={{ fontSize:11, color:'#388bfd' }}>{selectedIds.length} selected</p>}
+              {selectedIds.length > 0 && <p style={{ fontSize:11, color:'#388bfd', fontWeight:600 }}>✓ {selectedIds.length} contact{selectedIds.length > 1 ? 's' : ''} selected</p>}
             </div>
           )}
 
@@ -737,13 +780,15 @@ function SendToContactsModal({ flow, onClose, showToast }) {
               <div key={k}>
                 <label style={{ fontSize:10, color:'#6e7681', display:'block', marginBottom:3 }}>{label}</label>
                 <input value={form[k]} onChange={set(k)} placeholder={ph} style={iStyle}
-                  onFocus={e => e.target.style.borderColor='#388bfd'} onBlur={e => e.target.style.borderColor='#334155'} />
+                  onFocus={e => { e.target.style.borderColor='#388bfd'; e.target.style.outline='2px solid rgba(56,139,253,.3)' }}
+                  onBlur={e => { e.target.style.borderColor='#30363d'; e.target.style.outline='2px solid transparent' }} />
               </div>
             ))}
             <div>
               <label style={{ fontSize:10, color:'#6e7681', display:'block', marginBottom:3 }}>Body Text *</label>
               <textarea value={form.flow_body} onChange={set('flow_body')} rows={2} style={{ ...iStyle, resize:'vertical' }}
-                onFocus={e => e.target.style.borderColor='#388bfd'} onBlur={e => e.target.style.borderColor='#334155'} />
+                onFocus={e => { e.target.style.borderColor='#388bfd'; e.target.style.outline='2px solid rgba(56,139,253,.3)' }}
+                onBlur={e => { e.target.style.borderColor='#30363d'; e.target.style.outline='2px solid transparent' }} />
             </div>
           </div>
         </div>
@@ -900,13 +945,19 @@ export default function Flows() {
   const handleSave = async () => {
     const errs = validateFlow(activeFlow)
     if (errs.length) { setValidationErrors(errs); setShowValidation(true); return }
+    // Auto-mark last screen as terminal if none are marked (matches backend behaviour)
+    const screens = activeFlow.screens || []
+    const hasTerminal = screens.some(s => s.is_terminal)
+    const finalScreens = hasTerminal
+      ? screens
+      : screens.map((s, i) => i === screens.length - 1 ? { ...s, is_terminal: true } : s)
     setSaving(true)
     try {
       await api.patch(`/flows/${activeFlow.id}`, {
         name:        activeFlow.name,
         description: activeFlow.description,
         category:    activeFlow.category,
-        screens:     activeFlow.screens,
+        screens:     finalScreens,
       })
       await loadFlows()
       showToast('Flow saved')
@@ -924,14 +975,20 @@ export default function Flows() {
     if (!confirm(`Publish "${activeFlow.name}"?\n\nThis will upload the flow to Meta and make it live on WhatsApp.`)) return
     setPublishing(true)
     setPublishError(null)
+    // Auto-mark last screen as terminal if none are marked
+    const pubScreens = (activeFlow.screens || [])
+    const pubHasTerminal = pubScreens.some(s => s.is_terminal)
+    const finalPubScreens = pubHasTerminal
+      ? pubScreens
+      : pubScreens.map((s, i) => i === pubScreens.length - 1 ? { ...s, is_terminal: true } : s)
     try {
-      await api.patch(`/flows/${activeFlow.id}`, { screens: activeFlow.screens, name: activeFlow.name, category: activeFlow.category })
+      await api.patch(`/flows/${activeFlow.id}`, { screens: finalPubScreens, name: activeFlow.name, category: activeFlow.category })
       await api.post(`/flows/${activeFlow.id}/publish`)
       await loadFlows()
       showToast('Flow published on WhatsApp! 🎉')
     } catch (err) {
       const detail = err?.response?.data?.detail || err?.message || 'Publish failed'
-      setPublishError({ title: `Failed to publish "${activeFlow.name}"`, detail })
+      setPublishError({ title: `Failed to publish "${activeFlow.name}"`, detail, flowId: activeFlow.id })
     } finally {
       setPublishing(false)
     }
@@ -955,7 +1012,7 @@ export default function Flows() {
       showToast(`"${flow.name}" published! 🎉`)
     } catch (err) {
       const detail = err?.response?.data?.detail || err?.message || 'Publish failed'
-      setPublishError({ title: `Failed to publish "${flow.name}"`, detail })
+      setPublishError({ title: `Failed to publish "${flow.name}"`, detail, flowId })
     } finally {
       setQuickPublishId(null)
     }
@@ -1131,63 +1188,71 @@ export default function Flows() {
         ) : (
           <>
             {/* Flow header */}
-            <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 20px', borderBottom:'1px solid #21262d', flexShrink:0 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                  <input
-                    value={activeFlow.name}
-                    onChange={e => updateActiveFlow({ name:e.target.value })}
-                    style={{ background:'transparent', border:'none', color:'#e6edf3', fontSize:'15px', fontWeight:'700', outline:'none', borderBottom:'1px solid transparent', paddingBottom:'1px', fontFamily:'inherit' }}
-                    onFocus={e=>e.target.style.borderBottomColor='#388bfd'}
-                    onBlur={e=>e.target.style.borderBottomColor='transparent'}
-                  />
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${STATUS_CLS[activeFlow.status]||STATUS_CLS.DRAFT}`}>{activeFlow.status}</span>
+            <div style={{ padding:'10px 20px 8px', borderBottom:'1px solid #21262d', flexShrink:0 }}>
+              {/* Row 1 — name + status + actions */}
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                {/* Name */}
+                <input
+                  value={activeFlow.name}
+                  onChange={e => updateActiveFlow({ name:e.target.value })}
+                  style={{ background:'transparent', border:'none', borderBottom:'1px solid transparent', color:'#e6edf3', fontSize:15, fontWeight:700, outline:'none', paddingBottom:1, fontFamily:'inherit', minWidth:0, flex:'0 1 auto', maxWidth:200 }}
+                  onFocus={e => e.target.style.borderBottomColor='#388bfd'}
+                  onBlur={e => e.target.style.borderBottomColor='transparent'}
+                />
+                {/* Status badge */}
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${STATUS_CLS[activeFlow.status]||STATUS_CLS.DRAFT}`} style={{ flexShrink:0 }}>
+                  {activeFlow.status}
+                </span>
+                {/* Category */}
+                <select value={activeFlow.category} onChange={e => updateActiveFlow({ category:e.target.value })}
+                  style={{ background:'#0d1117', border:'1px solid #30363d', color:'#8b949e', fontSize:11, borderRadius:8, padding:'3px 6px', cursor:'pointer', flexShrink:0 }}>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
+                </select>
+                {/* version · screens */}
+                <span style={{ fontSize:11, color:'#484f58', flexShrink:0 }}>v{activeFlow.version} · {activeFlow.screens?.length || 0} screens</span>
+
+                {/* Spacer */}
+                <div style={{ flex:1 }} />
+
+                {/* Action buttons */}
+                <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                   {previewUrl && (
                     <a href={previewUrl} target="_blank" rel="noopener noreferrer"
-                      style={{ fontSize:'10px', fontWeight:'600', color:'#388bfd', background:'rgba(56,139,253,.1)', border:'1px solid rgba(56,139,253,.25)', borderRadius:'20px', padding:'2px 9px', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'4px', whiteSpace:'nowrap' }}
-                      title="Open Meta preview in Business Manager">
+                      style={{ fontSize:11, fontWeight:600, color:'#388bfd', background:'rgba(56,139,253,.08)', border:'1px solid rgba(56,139,253,.2)', borderRadius:8, padding:'5px 10px', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:4, whiteSpace:'nowrap' }}>
                       🔍 Preview
                     </a>
                   )}
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:'8px', marginTop:'4px' }}>
-                  <input
-                    value={activeFlow.description}
-                    onChange={e => updateActiveFlow({ description:e.target.value })}
-                    placeholder="Add a description..."
-                    style={{ background:'transparent', border:'none', color:'#8b949e', fontSize:'12px', outline:'none', fontFamily:'inherit', flex:1 }}
-                  />
-                  <span style={{ fontSize:'11px', color:'#6e7681' }}>v{activeFlow.version} · {activeFlow.screens?.length} screens</span>
-                </div>
-              </div>
-
-              {/* Category selector */}
-              <select value={activeFlow.category} onChange={e => updateActiveFlow({ category:e.target.value })}
-                style={{ background:'#161b22', border:'1px solid #30363d', color:'#8b949e', fontSize:'11px', borderRadius:'8px', padding:'5px 8px', cursor:'pointer' }}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
-              </select>
-
-              {/* Actions */}
-              <div style={{ display:'flex', gap:'8px' }}>
-                <button onClick={handleDuplicate}
-                  style={{ background:'#161b22', border:'1px solid #30363d', color:'#8b949e', borderRadius:'10px', padding:'7px 12px', fontSize:'12px', cursor:'pointer', fontFamily:'inherit' }}>
-                  Copy
-                </button>
-                <button onClick={handleSave} disabled={saving}
-                  style={{ background:'#21262d', border:'1px solid #30363d', color:'#e6edf3', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:'600', cursor:'pointer', display:'flex', alignItems:'center', gap:'6px', fontFamily:'inherit', opacity:saving?.8:1 }}>
-                  {saving ? <><svg style={{width:12,height:12,animation:'spin 1s linear infinite'}} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity=".3"/><path d="M22 12A10 10 0 0012 2" stroke="white" strokeWidth="3" strokeLinecap="round"/></svg>Saving…</> : '💾 Save'}
-                </button>
-                <button onClick={handlePublish} disabled={publishing||activeFlow.status==='PUBLISHED'}
-                  style={{ background: activeFlow.status==='PUBLISHED'?'rgba(34,197,94,.1)':'linear-gradient(135deg,#22c55e,#0d9488)', border: activeFlow.status==='PUBLISHED'?'1px solid rgba(34,197,94,.3)':'none', color: activeFlow.status==='PUBLISHED'?'#22c55e':'white', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:'700', cursor: activeFlow.status==='PUBLISHED'?'default':'pointer', display:'flex', alignItems:'center', gap:'6px', fontFamily:'inherit', opacity:publishing?.8:1 }}>
-                  {publishing ? 'Publishing…' : activeFlow.status==='PUBLISHED' ? '✓ Published' : '🚀 Publish'}
-                </button>
-                {activeFlow.status==='PUBLISHED' && (
-                  <button onClick={() => setShowSendModal(true)}
-                    style={{ background:'linear-gradient(135deg,#a371f7,#6e40c9)', border:'none', color:'white', borderRadius:'10px', padding:'7px 14px', fontSize:'12px', fontWeight:'700', cursor:'pointer', display:'flex', alignItems:'center', gap:'6px', fontFamily:'inherit' }}>
-                    📤 Send
+                  <button onClick={handleDuplicate}
+                    style={{ background:'#161b22', border:'1px solid #30363d', color:'#8b949e', borderRadius:8, padding:'5px 10px', fontSize:11, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                    Copy
                   </button>
-                )}
+                  <button onClick={handleSave} disabled={saving}
+                    style={{ background:'#21262d', border:'1px solid #30363d', color:'#e6edf3', borderRadius:8, padding:'5px 12px', fontSize:12, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontFamily:'inherit', opacity:saving ? .7 : 1, whiteSpace:'nowrap' }}>
+                    {saving
+                      ? <><svg style={{width:11,height:11,animation:'spin 1s linear infinite'}} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity=".3"/><path d="M22 12A10 10 0 0012 2" stroke="white" strokeWidth="3" strokeLinecap="round"/></svg>Saving…</>
+                      : '💾 Save'}
+                  </button>
+                  {activeFlow.status !== 'PUBLISHED' ? (
+                    <button onClick={handlePublish} disabled={publishing}
+                      style={{ background:'linear-gradient(135deg,#22c55e,#0d9488)', border:'none', color:'white', borderRadius:8, padding:'5px 14px', fontSize:12, fontWeight:700, cursor: publishing ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:5, fontFamily:'inherit', opacity: publishing ? .7 : 1, whiteSpace:'nowrap' }}>
+                      {publishing ? 'Publishing…' : '🚀 Publish'}
+                    </button>
+                  ) : (
+                    <button onClick={() => setShowSendModal(true)}
+                      style={{ background:'linear-gradient(135deg,#a371f7,#6e40c9)', border:'none', color:'white', borderRadius:8, padding:'5px 14px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                      📤 Send
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Row 2 — description */}
+              <input
+                value={activeFlow.description || ''}
+                onChange={e => updateActiveFlow({ description:e.target.value })}
+                placeholder="Add a description…"
+                style={{ background:'transparent', border:'none', color:'#6e7681', fontSize:11, outline:'none', fontFamily:'inherit', width:'100%', marginTop:4 }}
+              />
             </div>
 
             {/* Validation errors */}
@@ -1501,11 +1566,23 @@ export default function Flows() {
                   {publishError.errors.map((e,i) => <li key={i}>{e}</li>)}
                 </ul>
               )}
-              <div style={{ background:'rgba(56,139,253,.06)', border:'1px solid rgba(56,139,253,.15)', borderRadius:10, padding:'10px 14px', marginTop:4 }}>
-                <p style={{ fontSize:11, color:'rgba(139,184,253,.8)', lineHeight:1.6, margin:0 }}>
-                  <b>Tip:</b> Make sure every screen has a Footer action, at least one screen is marked Terminal, and all Navigate buttons point to a valid screen.
-                </p>
-              </div>
+              {publishError.flowId && (
+                <button
+                  onClick={async () => {
+                    if (!confirm('This will clear the stuck Meta flow ID and register a fresh one on Meta. Continue?')) return
+                    try {
+                      await api.post(`/flows/${publishError.flowId}/reset-meta-id`)
+                      setPublishError(null)
+                      showToast('Meta ID reset. Try publishing again.')
+                    } catch (e) {
+                      showToast(e?.response?.data?.detail || 'Reset failed', 'error')
+                    }
+                  }}
+                  style={{ padding:'8px 14px', background:'rgba(248,81,73,.1)', border:'1px solid rgba(248,81,73,.3)', color:'#f85149', borderRadius:10, fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}
+                >
+                  Reset & Re-register on Meta
+                </button>
+              )}
               <button onClick={() => setPublishError(null)}
                 style={{ alignSelf:'flex-end', padding:'8px 20px', background:'#21262d', border:'1px solid #30363d', color:'#e6edf3', borderRadius:10, fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
                 Close
