@@ -2,13 +2,16 @@
  * FlowCanvas.jsx — ReactFlow visual canvas for WhatsApp Flow Builder
  * Each WhatsApp screen is a draggable node; navigation buttons create edges.
  */
-import { useCallback, useEffect, useRef, memo } from 'react'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
 import {
   ReactFlow, Background, Controls, MiniMap, Panel,
   useNodesState, useEdgesState,
   Handle, Position, MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+
+// ── Small id generator for components/buttons created from the canvas ─────────
+const uid = () => Math.random().toString(36).slice(2, 10)
 
 // ── Component type icons ───────────────────────────────────────────────────────
 const COMP_ICONS = {
@@ -18,7 +21,8 @@ const COMP_ICONS = {
 
 // ── Custom Screen Node ─────────────────────────────────────────────────────────
 const ScreenNode = memo(function ScreenNode({ data, selected }) {
-  const { screen, isFirst } = data
+  const { screen, isFirst, onEdit, onDelete } = data
+  const [hovered, setHovered] = useState(false)
 
   const borderColor = selected
     ? '#388bfd'
@@ -35,18 +39,53 @@ const ScreenNode = memo(function ScreenNode({ data, selected }) {
   const dotColor = screen.is_terminal ? '#3fb950' : isFirst ? '#a371f7' : '#388bfd'
 
   return (
-    <div style={{
-      background: '#161b22',
-      border: `2px solid ${borderColor}`,
-      borderRadius: 12,
-      width: 230,
-      boxShadow: selected
-        ? '0 0 0 3px rgba(56,139,253,.18), 0 8px 24px rgba(0,0,0,.5)'
-        : '0 4px 16px rgba(0,0,0,.45)',
-      transition: 'border-color .15s, box-shadow .15s',
-      fontFamily: "'Inter',system-ui,sans-serif",
-      cursor: 'pointer',
-    }}>
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: 'relative',
+        background: '#161b22',
+        border: `2px solid ${borderColor}`,
+        borderRadius: 12,
+        width: 230,
+        boxShadow: selected
+          ? '0 0 0 3px rgba(56,139,253,.18), 0 8px 24px rgba(0,0,0,.5)'
+          : '0 4px 16px rgba(0,0,0,.45)',
+        transition: 'border-color .15s, box-shadow .15s',
+        fontFamily: "'Inter',system-ui,sans-serif",
+        cursor: 'pointer',
+      }}>
+      {/* Hover toolbar — edit / delete */}
+      {hovered && (
+        <div style={{
+          position: 'absolute', top: -12, right: 6, zIndex: 10,
+          display: 'flex', gap: 4,
+        }}>
+          <button
+            title="Edit screen"
+            onClick={(e) => { e.stopPropagation(); onEdit?.(screen.id) }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: 24, height: 24, borderRadius: 6, border: '1px solid #30363d',
+              background: '#21262d', color: '#e6edf3', fontSize: 11, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+            }}
+          >✏️</button>
+          <button
+            title="Delete screen"
+            onClick={(e) => { e.stopPropagation(); onDelete?.(screen.id) }}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: 24, height: 24, borderRadius: 6, border: '1px solid #30363d',
+              background: '#21262d', color: '#f85149', fontSize: 11, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+            }}
+          >🗑</button>
+        </div>
+      )}
+
       {/* Target handle — left */}
       <Handle
         type="target"
@@ -188,7 +227,7 @@ function buildEdges(screens) {
                 labelBgStyle: { fill: '#1c2128', fillOpacity: .95 },
                 labelBgPadding: [4, 3],
                 labelBgBorderRadius: 4,
-                style: { stroke: '#388bfd', strokeWidth: 1.5 },
+                style: { stroke: '#388bfd', strokeWidth: 1.5, cursor: 'pointer' },
                 markerEnd: { type: MarkerType.ArrowClosed, color: '#388bfd', width: 16, height: 16 },
               })
             }
@@ -201,7 +240,7 @@ function buildEdges(screens) {
 }
 
 // ── Main FlowCanvas component ─────────────────────────────────────────────────
-export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSelectScreen, onAddScreen }) {
+export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSelectScreen, onAddScreen, onDeleteScreen }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const flowIdRef = useRef(null)
@@ -222,7 +261,7 @@ export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSel
           id: screen.id,
           type: 'screen',
           position: existing?.position || screen._pos || positions[screen.id] || { x: i * 300 + 40, y: 60 },
-          data: { screen, isFirst: i === 0 },
+          data: { screen, isFirst: i === 0, onEdit: onSelectScreen, onDelete: onDeleteScreen },
         }
       })
     )
@@ -236,14 +275,20 @@ export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSel
     })
   }, [flow, onUpdateFlow])
 
-  // On connect: set next_screen on first available NAVIGATE button
+  // On connect: link source → target like a flowchart editor, falling back through:
+  //  1) an existing NAVIGATE button with no target yet
+  //  2) the screen's last NAVIGATE button (repurpose it to point at the new target)
+  //  3) a brand-new "Continue" button/footer component
   const onConnect = useCallback((params) => {
     const { source, target } = params
     if (source === target) return
+
     let connected = false
     const updatedScreens = flow.screens.map(s => {
       if (s.id !== source) return s
-      const updatedComps = s.components.map(comp => {
+
+      // Tier 1: first untargeted NAVIGATE button
+      let updatedComps = s.components.map(comp => {
         if (connected || (comp.type !== 'buttons' && comp.type !== 'footer')) return comp
         const updatedBtns = comp.buttons.map(btn => {
           if (connected || btn.action !== 'NAVIGATE') return btn
@@ -252,9 +297,51 @@ export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSel
         })
         return { ...comp, buttons: updatedBtns }
       })
-      return { ...s, components: updatedComps }
+
+      // Tier 2: repurpose the last NAVIGATE button on the screen
+      if (!connected) {
+        for (let i = updatedComps.length - 1; i >= 0 && !connected; i--) {
+          const comp = updatedComps[i]
+          if (comp.type !== 'buttons' && comp.type !== 'footer') continue
+          for (let j = comp.buttons.length - 1; j >= 0; j--) {
+            if (comp.buttons[j].action === 'NAVIGATE') {
+              const newBtns = comp.buttons.map((btn, k) => k === j ? { ...btn, next_screen: target } : btn)
+              updatedComps = updatedComps.map((c, k) => k === i ? { ...c, buttons: newBtns } : c)
+              connected = true
+              break
+            }
+          }
+        }
+      }
+
+      // Tier 3: create a brand-new "Continue" buttons component
+      if (!connected) {
+        const newButton = { id: `b_${uid()}`, label: 'Continue', action: 'NAVIGATE', next_screen: target }
+        updatedComps = [...updatedComps, { id: `c_${uid()}`, type: 'buttons', buttons: [newButton] }]
+        connected = true
+      }
+
+      // A screen that navigates onward can't be terminal — WhatsApp forces terminal
+      // screens to "complete" and silently drops any navigate target, breaking the chain.
+      return { ...s, components: updatedComps, is_terminal: false }
     })
+
     if (connected) onUpdateFlow({ screens: updatedScreens })
+  }, [flow, onUpdateFlow])
+
+  // Click an edge to remove that screen-to-screen connection (clears the button's next_screen)
+  const onEdgeClick = useCallback((event, edge) => {
+    event.stopPropagation()
+    if (!confirm(`Remove the connection to "${edge.label || 'this screen'}"?`)) return
+    const btnId = edge.id.replace(/^edge_/, '')
+    const updatedScreens = flow.screens.map(s => ({
+      ...s,
+      components: s.components.map(comp => {
+        if (comp.type !== 'buttons' && comp.type !== 'footer') return comp
+        return { ...comp, buttons: comp.buttons.map(btn => btn.id === btnId ? { ...btn, next_screen: '' } : btn) }
+      }),
+    }))
+    onUpdateFlow({ screens: updatedScreens })
   }, [flow, onUpdateFlow])
 
   return (
@@ -265,6 +352,7 @@ export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSel
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onEdgeClick={onEdgeClick}
         onNodeDragStop={onNodeDragStop}
         onNodeClick={(_, node) => onSelectScreen(node.id)}
         onPaneClick={() => onSelectScreen(null)}
@@ -326,7 +414,7 @@ export default function FlowCanvas({ flow, onUpdateFlow, selectedScreenId, onSel
             fontSize: 10, color: '#484f58', fontFamily: "'Inter',system-ui,sans-serif",
             background: 'rgba(13,17,23,.7)', padding: '3px 10px', borderRadius: 6,
           }}>
-            Click node to edit · Drag orange handle to connect screens
+            Click node to edit · Hover a node for ✏️ edit / 🗑 delete · Drag orange handle to connect screens · Click an edge to remove
           </p>
         </Panel>
       </ReactFlow>

@@ -5,7 +5,10 @@ const BASE = import.meta.env.VITE_API_URL
 export const agentApi = axios.create({
   baseURL: BASE,
   timeout: 15000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
+  },
 })
 
 agentApi.interceptors.request.use(cfg => {

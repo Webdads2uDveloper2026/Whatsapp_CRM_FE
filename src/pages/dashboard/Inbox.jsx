@@ -4,16 +4,94 @@ import api from '../../services/api'
 import { useInboxSocket } from '../../hooks/useInboxSocket'
 import SendTemplateModal from './SendTemplateModal'
 import SendFlowModal from './SendFlowModal'
+import { Mp3Encoder } from '@breezystack/lamejs'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+const TZ = 'Asia/Kolkata'
+
+// Python's datetime.utcnow().isoformat() produces strings without a 'Z' (e.g.
+// "2024-01-01T10:26:00.123456"). Browsers then interpret that as *local* time
+// instead of UTC, so 04:56 UTC shows as 04:56 IST instead of 10:26 IST.
+// Appending 'Z' forces correct UTC parsing before we convert to IST for display.
+const parseUTC = iso => {
+  if (!iso) return null
+  const s = /[Z+]/.test(iso.slice(-6)) ? iso : iso + 'Z'
+  return new Date(s)
+}
+
 const fmt = iso => {
-  if (!iso) return ''
-  const d = new Date(iso), now = new Date()
+  const d = parseUTC(iso)
+  if (!d || isNaN(d)) return ''
+  const now = new Date()
+  // Compare calendar dates in IST so Today/Yesterday boundaries are correct for India
+  const toDay = dt => new Date(dt.toLocaleString('en-US', { timeZone: TZ })).toDateString()
+  const dDay  = toDay(d)
+  const nowDay = toDay(now)
+  const yday   = toDay(new Date(now - 86400000))
+  if (dDay === nowDay) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: TZ })
+  if (dDay === yday)   return 'Yesterday'
   const diff = Math.floor((now - d) / 86400000)
-  if (diff === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  if (diff === 1) return 'Yesterday'
-  if (diff < 7)  return d.toLocaleDateString([], { weekday: 'short' })
-  return d.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  if (diff < 7) return d.toLocaleDateString('en-IN', { weekday: 'short', timeZone: TZ })
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: TZ })
+}
+
+const fmtRecordTime = secs => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
+
+// MediaRecorder's output containers are unreliable across browsers — Chrome will
+// happily report `audio/mp4` as supported yet emit bytes Meta's processing pipeline
+// can't recognise (error 131053: "processing it is of type application/octet-stream").
+// Rather than gamble on the browser's container, we record in whatever native format
+// it handles best, decode the PCM via Web Audio, and re-encode to a real MP3
+// (audio/mpeg — on Meta's accepted list) ourselves. That guarantees valid bytes.
+const RECORDER_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+]
+function pickRecorderMimeType() {
+  return RECORDER_MIME_CANDIDATES.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || ''
+}
+
+function floatTo16BitPCM(input) {
+  const out = new Int16Array(input.length)
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]))
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff
+  }
+  return out
+}
+
+// Decodes a recorded blob (whatever container the browser produced) to PCM via
+// Web Audio, then re-encodes it as a genuine MP3 file using lamejs.
+async function recordingToMp3(blob) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  const ctx = new AudioCtx()
+  let audioBuffer
+  try {
+    audioBuffer = await ctx.decodeAudioData(await blob.arrayBuffer())
+  } finally {
+    ctx.close()
+  }
+
+  const channels   = Math.min(audioBuffer.numberOfChannels, 2)
+  const sampleRate = audioBuffer.sampleRate
+  const left       = floatTo16BitPCM(audioBuffer.getChannelData(0))
+  const right      = channels > 1 ? floatTo16BitPCM(audioBuffer.getChannelData(1)) : null
+
+  const encoder  = new Mp3Encoder(channels, sampleRate, 128)
+  const blockSize = 1152
+  const chunks = []
+  for (let i = 0; i < left.length; i += blockSize) {
+    const l = left.subarray(i, i + blockSize)
+    const r = right ? right.subarray(i, i + blockSize) : undefined
+    const buf = r ? encoder.encodeBuffer(l, r) : encoder.encodeBuffer(l)
+    if (buf.length > 0) chunks.push(buf)
+  }
+  const tail = encoder.flush()
+  if (tail.length > 0) chunks.push(tail)
+
+  return new Blob(chunks, { type: 'audio/mpeg' })
 }
 
 const AVATAR_BG = ['bg-violet-600','bg-cyan-600','bg-emerald-600','bg-amber-600','bg-rose-600','bg-blue-600','bg-pink-600']
@@ -34,6 +112,126 @@ function Tick({ status }) {
   if (status === 'sent')      return <span className="text-slate-500 text-[11px]">✓</span>
   if (status === 'failed')    return <span className="text-red-400 text-[11px]">✗</span>
   return null
+}
+
+// ── Proxied media (fetched as a blob through the authenticated `api` instance) ─
+// <img>/<audio>/<video> tags issue plain browser GETs that carry neither the
+// Authorization header nor the ngrok-skip-browser-warning header, so the proxy
+// URL would resolve to an interstitial/401 page instead of the media bytes.
+// Fetching through `api` and handing the element a blob: URL sidesteps that.
+function useProxiedMediaUrl(mediaId) {
+  const [url, setUrl]     = useState(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    setUrl(null)
+    setError(false)
+    if (!mediaId) return
+    let cancelled  = false
+    let objectUrl  = null
+    api.get(`/media/proxy?media_id=${encodeURIComponent(mediaId)}`, { responseType: 'blob' })
+      .then(({ data }) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(data)
+        setUrl(objectUrl)
+      })
+      .catch(() => { if (!cancelled) setError(true) })
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [mediaId])
+
+  return { url, error }
+}
+
+function MediaImage({ c }) {
+  const { url, error } = useProxiedMediaUrl(c.id || c.image?.id || c.url)
+  return (
+    <div>
+      {url ? (
+        <img
+          src={url}
+          alt={c.caption || 'Image'}
+          className="rounded-xl max-w-[220px] w-full object-cover cursor-pointer"
+          style={{ maxHeight: 280, minHeight: 80, display: 'block' }}
+          onClick={() => window.open(url, '_blank')}
+        />
+      ) : (
+        <div className="w-full max-w-[220px] bg-slate-700 rounded-xl flex items-center justify-center p-4" style={{ minHeight: 80 }}>
+          <span className="text-3xl">{error ? '🖼️' : '⏳'}</span>
+        </div>
+      )}
+      {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
+    </div>
+  )
+}
+
+function MediaVideo({ c }) {
+  const { url, error } = useProxiedMediaUrl(c.id || c.video?.id || c.url)
+  return (
+    <div>
+      {url ? (
+        <video controls className="rounded-xl max-w-[220px] w-full" style={{ maxHeight: 280 }}>
+          <source src={url} type={c.mime_type || c.video?.mime_type || 'video/mp4'} />
+        </video>
+      ) : (
+        <div className="w-full max-w-[220px] bg-slate-900 rounded-xl flex items-center justify-center p-4" style={{ minHeight: 100 }}>
+          <span className="text-3xl">{error ? '🎥' : '⏳'}</span>
+        </div>
+      )}
+      {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
+    </div>
+  )
+}
+
+function MediaAudio({ c }) {
+  const { url, error } = useProxiedMediaUrl(c.id || c.audio?.id || c.url)
+  const isVoice = c.voice ?? c.audio?.voice
+  return (
+    <div className="min-w-[200px] max-w-[260px]">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center shrink-0">
+          <span>{isVoice ? '🎤' : '🎵'}</span>
+        </div>
+        <span className="text-[11px] text-slate-400">{isVoice ? 'Voice message' : 'Audio'}</span>
+      </div>
+      {url ? (
+        <audio controls style={{ width: '100%', height: 36 }}>
+          <source src={url} type={c.mime_type || c.audio?.mime_type || 'audio/ogg'} />
+        </audio>
+      ) : (
+        <div className="flex items-center gap-0.5 h-5">
+          {[3,5,4,7,5,3,6,4,5,3,4,6].map((h,i) => (
+            <div key={i} className="w-1 bg-slate-500 rounded-full" style={{ height: h*3 }}/>
+          ))}
+        </div>
+      )}
+      {error && <p className="text-[10px] text-red-400 mt-1">Failed to load audio</p>}
+    </div>
+  )
+}
+
+function MediaDocument({ c }) {
+  const { url } = useProxiedMediaUrl(c.id || c.document?.id || c.url)
+  return (
+    <div className="flex items-center gap-3 bg-black/20 rounded-xl p-2.5 min-w-[180px] max-w-[240px]">
+      <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
+        <span className="text-lg">📄</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-medium text-slate-200 truncate">{c.filename || 'Document'}</p>
+        <p className="text-[10px] text-slate-400">{c.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}</p>
+        {c.caption && <p className="text-[10px] text-slate-300 mt-0.5 truncate">{c.caption}</p>}
+        {url && (
+          <a href={url} download={c.filename || 'document'} target="_blank" rel="noopener noreferrer"
+            className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 block">
+            ⬇ Download
+          </a>
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ── New Conversation Modal ────────────────────────────────────────────────────
@@ -262,12 +460,18 @@ export default function Inbox() {
   const [replyTo,      setReplyTo]      = useState(null)   // message being replied to
   const [msgInfo,      setMsgInfo]      = useState(null)   // message info modal
   const [showRight, setShowRight]     = useState(true)
+  const [isRecording,  setIsRecording]  = useState(false)
+  const [recordSecs,   setRecordSecs]   = useState(0)
 
   const bottomRef   = useRef(null)
   const chatRef     = useRef(null)
   const inputRef    = useRef(null)
   const fileInputRef = useRef(null)
   const selectedRef = useRef(null)   // stable ref — avoids WS handler recreation
+  const recorderRef   = useRef(null)   // MediaRecorder instance
+  const recordChunksRef = useRef([])
+  const recordStreamRef = useRef(null) // mic MediaStream — stopped when recording ends
+  const recordTimerRef  = useRef(null)
 
   // ── Load conversations ──────────────────────────────────────────────────
   const loadConvos = useCallback(() => {
@@ -411,7 +615,7 @@ export default function Inbox() {
 
     if (ev.type === 'status_update') {
       setMessages(p => p.map(m =>
-        m.wa_message_id === ev.wa_message_id ? { ...m, status: ev.status } : m
+        m.wa_message_id === ev.wa_message_id ? { ...m, status: ev.status, error: ev.error || m.error } : m
       ))
     }
   }, [])  // ← empty deps: uses selectedRef + setConvos/setMessages (stable setters)
@@ -450,6 +654,81 @@ export default function Inbox() {
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
+
+  // ── Voice recording (record mic → upload → send as audio message) ───────
+  const stopRecordingTracks = () => {
+    recordStreamRef.current?.getTracks().forEach(t => t.stop())
+    recordStreamRef.current = null
+    clearInterval(recordTimerRef.current)
+    recordTimerRef.current = null
+  }
+
+  const sendRecording = async (mimeType) => {
+    if (!selected || !recordChunksRef.current.length) return
+    setUploadingMedia(true)
+    try {
+      const rawBlob = new Blob(recordChunksRef.current, { type: mimeType })
+      const mp3Blob = await recordingToMp3(rawBlob)
+      const file = new File([mp3Blob], 'voice-note.mp3', { type: 'audio/mpeg' })
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('type', 'audio')
+      const uploadRes = await api.post('/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      await api.post(`/conversations/${selected.id}/messages`, { msg_type: 'audio', media_id: uploadRes.data.id })
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to send voice note')
+    } finally {
+      setUploadingMedia(false)
+      recordChunksRef.current = []
+    }
+  }
+
+  const startRecording = async () => {
+    if (!selected || isRecording) return
+    const mime = pickRecorderMimeType()
+    if (!mime) {
+      alert('Your browser doesn\'t support recording audio — try an up-to-date Chrome, Edge, or Safari, or attach an existing audio file instead.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream, { mimeType: mime })
+      recordStreamRef.current = stream
+      recordChunksRef.current = []
+      recorder.ondataavailable = e => { if (e.data.size > 0) recordChunksRef.current.push(e.data) }
+      recorder.onstop = () => sendRecording(recorder.mimeType || mime || 'audio/webm')
+      recorder.start()
+      recorderRef.current = recorder
+      setRecordSecs(0)
+      setIsRecording(true)
+      recordTimerRef.current = setInterval(() => setRecordSecs(s => s + 1), 1000)
+    } catch {
+      alert('Microphone access denied — allow microphone permission to record voice notes')
+    }
+  }
+
+  const finishRecording = () => {
+    if (!recorderRef.current) return
+    recorderRef.current.stop()   // → triggers onstop → sendRecording
+    stopRecordingTracks()
+    setIsRecording(false)
+    setRecordSecs(0)
+    recorderRef.current = null
+  }
+
+  const cancelRecording = () => {
+    if (!recorderRef.current) return
+    recorderRef.current.onstop = null
+    recorderRef.current.stop()
+    stopRecordingTracks()
+    recordChunksRef.current = []
+    setIsRecording(false)
+    setRecordSecs(0)
+    recorderRef.current = null
+  }
+
+  // Stop any in-flight recording if the user switches conversations / unmounts
+  useEffect(() => () => cancelRecording(), [])
 
   const sendText = async e => {
     e?.preventDefault()
@@ -661,6 +940,15 @@ export default function Inbox() {
             <span className={`text-xs font-medium font-mono ${r.c}`}>{r.val}</span>
           </div>
         ))}
+        {m.status === 'failed' && m.error && (
+          <div className="mt-3 p-2.5 rounded-lg bg-red-950/40 border border-red-900/50">
+            <p className="text-[11px] font-bold text-red-400 mb-1">
+              Delivery failed{m.error.code ? ` (#${m.error.code})` : ''}
+            </p>
+            <p className="text-[11px] text-red-300/90">{m.error.title || m.error.message}</p>
+            {m.error.details && <p className="text-[10px] text-red-300/70 mt-1">{m.error.details}</p>}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -668,7 +956,9 @@ export default function Inbox() {
   const renderBubble = m => {
     const isOut = m.direction === 'outbound'
     const c     = m.content || {}
-    const type  = m.type || m.msg_type || 'text'
+    // content.type carries the specific interactive sub-type (flow_response, button_reply, ...)
+    // — prefer it so older messages stored with the generic "interactive" type still render right
+    const type  = c.type || m.type || m.msg_type || 'text'
 
     // ── Reaction — inline pill display ────────────────────────────────────
     if (type === 'reaction') {
@@ -689,106 +979,17 @@ export default function Inbox() {
         case 'text':
           return <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words">{c.body || ''}</p>
 
-        case 'image': {
-          const mediaId  = c.id || c.image?.id || c.url
-          const _tok     = localStorage.getItem('access_token') || ''
-          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
-          return (
-            <div>
-              {proxyUrl ? (
-                <>
-                  <img
-                    src={proxyUrl}
-                    alt={c.caption || 'Image'}
-                    className="rounded-xl max-w-[220px] w-full object-cover cursor-pointer"
-                    style={{ maxHeight:280, minHeight:80, display:'block' }}
-                    onClick={() => window.open(proxyUrl, '_blank')}
-                    onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }}
-                  />
-                  <div className="w-full max-w-[220px] bg-slate-700 rounded-xl items-center justify-center p-4" style={{minHeight:80,display:'none'}}>
-                    <span className="text-3xl">🖼️</span>
-                  </div>
-                </>
-              ) : (
-                <div className="w-full max-w-[220px] bg-slate-700 rounded-xl flex items-center justify-center p-4" style={{minHeight:80}}>
-                  <span className="text-3xl">🖼️</span>
-                </div>
-              )}
-              {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
-            </div>
-          )
-        }
+        case 'image':
+          return <MediaImage c={c} />
 
-        case 'video': {
-          const mediaId  = c.id || c.video?.id || c.url
-          const _tok     = localStorage.getItem('access_token') || ''
-          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
-          return (
-            <div>
-              {proxyUrl ? (
-                <video controls className="rounded-xl max-w-[220px] w-full" style={{maxHeight:280}}>
-                  <source src={proxyUrl} type={c.mime_type || 'video/mp4'} />
-                </video>
-              ) : (
-                <div className="w-full max-w-[220px] bg-slate-900 rounded-xl flex items-center justify-center p-4" style={{minHeight:100}}>
-                  <span className="text-3xl">🎥</span>
-                </div>
-              )}
-              {c.caption && <p className="text-[12px] text-slate-200 mt-1">{c.caption}</p>}
-            </div>
-          )
-        }
+        case 'video':
+          return <MediaVideo c={c} />
 
-        case 'audio': {
-          const mediaId  = c.id || c.audio?.id || c.url
-          const _tok     = localStorage.getItem('access_token') || ''
-          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
-          return (
-            <div className="min-w-[200px] max-w-[260px]">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center shrink-0">
-                  <span>{c.voice ? '🎤' : '🎵'}</span>
-                </div>
-                <span className="text-[11px] text-slate-400">{c.voice ? 'Voice message' : 'Audio'}</span>
-              </div>
-              {proxyUrl ? (
-                <audio controls style={{width:'100%', height:36}}>
-                  <source src={proxyUrl} type={c.mime_type || 'audio/ogg'} />
-                </audio>
-              ) : (
-                <div className="flex items-center gap-0.5 h-5">
-                  {[3,5,4,7,5,3,6,4,5,3,4,6].map((h,i) => (
-                    <div key={i} className="w-1 bg-slate-500 rounded-full" style={{height:h*3}}/>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        }
+        case 'audio':
+          return <MediaAudio c={c} />
 
-        case 'document': {
-          const mediaId  = c.id || c.document?.id || c.url
-          const _tok     = localStorage.getItem('access_token') || ''
-          const proxyUrl = mediaId ? `${import.meta.env.VITE_API_URL || '/api/v1'}/media/proxy?media_id=${mediaId}&token=${_tok}` : null
-          return (
-            <div className="flex items-center gap-3 bg-black/20 rounded-xl p-2.5 min-w-[180px] max-w-[240px]">
-              <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
-                <span className="text-lg">📄</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-medium text-slate-200 truncate">{c.filename || 'Document'}</p>
-                <p className="text-[10px] text-slate-400">{c.mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}</p>
-                {c.caption && <p className="text-[10px] text-slate-300 mt-0.5 truncate">{c.caption}</p>}
-                {proxyUrl && (
-                  <a href={proxyUrl} download={c.filename || 'document'} target="_blank" rel="noopener noreferrer"
-                    className="text-[10px] text-blue-400 hover:text-blue-300 mt-1 block">
-                    ⬇ Download
-                  </a>
-                )}
-              </div>
-            </div>
-          )
-        }
+        case 'document':
+          return <MediaDocument c={c} />
 
         case 'sticker':
           return (
@@ -1172,54 +1373,86 @@ export default function Inbox() {
 
             {/* Composer */}
             <div className="flex items-end gap-2 px-4 py-3 border-t border-slate-800 bg-slate-950/80 shrink-0">
-              {/* Hidden file input */}
-              <input ref={fileInputRef} type="file" className="hidden"
-                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
-                onChange={handleFileAttachment}
-              />
-              {/* Attachment button */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingMedia}
-                className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 hover:border-amber-700/50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Send image, video, audio or document">
-                {uploadingMedia
-                  ? <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".25"/><path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
-                  : <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd"/></svg>
-                }
-              </button>
-              <button onClick={() => setShowTplModal(true)}
-                className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400 hover:bg-blue-900/20 hover:border-blue-700/50 transition-colors shrink-0"
-                title="Send Template">
-                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                  <path d="M3 4h14v2H3zM3 8h10v2H3zM3 12h8v2H3z"/>
-                </svg>
-              </button>
-              <button onClick={handleOpenFlowModal}
-                className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/20 hover:border-emerald-700/50 transition-colors shrink-0"
-                title="Send Flow">
-                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                  <path fillRule="evenodd" d="M3 5a1 1 0 000 2h11.586l-2.293 2.293a1 1 0 101.414 1.414l4-4a1 1 0 000-1.414l-4-4a1 1 0 10-1.414 1.414L14.586 4H3a1 1 0 00-1 1zm14 9a1 1 0 100-2H5.414l2.293-2.293a1 1 0 10-1.414-1.414l-4 4a1 1 0 000 1.414l4 4a1 1 0 101.414-1.414L5.414 15H17a1 1 0 001-1z" clipRule="evenodd"/>
-                </svg>
-              </button>
-              <textarea ref={inputRef} rows={1} value={text}
-                onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText() } }}
-                onInput={e => { e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,120)+'px' }}
-                placeholder={!windowOpen && selected.window_expires_at ? 'Window closed — use a template ↑' : 'Type a message… (Enter to send)'}
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500 resize-none transition-colors min-h-[40px] max-h-[120px] font-[inherit]"
-              />
-              <button onClick={sendText} disabled={!text.trim() || sending}
-                className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors shrink-0 disabled:cursor-not-allowed">
-                {sending ? (
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".25"/>
-                    <path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M2.5 10L17 2.5l-5 7.5 5 7.5L2.5 10z"/></svg>
-                )}
-              </button>
+              {isRecording ? (
+                <div className="flex-1 flex items-center gap-3 bg-slate-800 border border-rose-700/50 rounded-xl px-4 py-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                  <span className="text-sm text-slate-200 font-mono">{fmtRecordTime(recordSecs)}</span>
+                  <span className="text-xs text-slate-400 flex-1">Recording voice note…</span>
+                  <button onClick={cancelRecording} title="Cancel"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-900/20 transition-colors">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M6 6h8v8H6V6z" clipRule="evenodd"/>
+                    </svg>
+                  </button>
+                  <button onClick={finishRecording} title="Send voice note"
+                    className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-900/20 transition-colors">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M2.5 10L17 2.5l-5 7.5 5 7.5L2.5 10z"/></svg>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Hidden file input */}
+                  <input ref={fileInputRef} type="file" className="hidden"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                    onChange={handleFileAttachment}
+                  />
+                  {/* Attachment button */}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingMedia}
+                    className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 hover:border-amber-700/50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Send image, video, audio or document">
+                    {uploadingMedia
+                      ? <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".25"/><path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                      : <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M8 4a3 3 0 00-3 3v4a5 5 0 0010 0V7a1 1 0 112 0v4a7 7 0 11-14 0V7a5 5 0 0110 0v4a3 3 0 11-6 0V7a1 1 0 012 0v4a1 1 0 102 0V7a3 3 0 00-3-3z" clipRule="evenodd"/></svg>
+                    }
+                  </button>
+                  <button onClick={() => setShowTplModal(true)}
+                    className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400 hover:bg-blue-900/20 hover:border-blue-700/50 transition-colors shrink-0"
+                    title="Send Template">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path d="M3 4h14v2H3zM3 8h10v2H3zM3 12h8v2H3z"/>
+                    </svg>
+                  </button>
+                  <button onClick={handleOpenFlowModal}
+                    className="p-2 rounded-xl border bg-slate-800 border-slate-700 text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/20 hover:border-emerald-700/50 transition-colors shrink-0"
+                    title="Send Flow">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M3 5a1 1 0 000 2h11.586l-2.293 2.293a1 1 0 101.414 1.414l4-4a1 1 0 000-1.414l-4-4a1 1 0 10-1.414 1.414L14.586 4H3a1 1 0 00-1 1zm14 9a1 1 0 100-2H5.414l2.293-2.293a1 1 0 10-1.414-1.414l-4 4a1 1 0 000 1.414l4 4a1 1 0 101.414-1.414L5.414 15H17a1 1 0 001-1z" clipRule="evenodd"/>
+                    </svg>
+                  </button>
+                  <textarea ref={inputRef} rows={1} value={text}
+                    onChange={e => setText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText() } }}
+                    onInput={e => { e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,120)+'px' }}
+                    placeholder={!windowOpen && selected.window_expires_at ? 'Window closed — use a template ↑' : 'Type a message… (Enter to send)'}
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500 resize-none transition-colors min-h-[40px] max-h-[120px] font-[inherit]"
+                  />
+                  {text.trim() ? (
+                    <button onClick={sendText} disabled={sending}
+                      className="p-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors shrink-0 disabled:cursor-not-allowed">
+                      {sending ? (
+                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".25"/>
+                          <path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M2.5 10L17 2.5l-5 7.5 5 7.5L2.5 10z"/></svg>
+                      )}
+                    </button>
+                  ) : (
+                    <button onClick={startRecording} disabled={uploadingMedia}
+                      title="Record voice note"
+                      className="p-2.5 bg-slate-800 hover:bg-emerald-900/30 disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700 hover:border-emerald-700/50 text-slate-400 hover:text-emerald-400 rounded-xl transition-colors shrink-0">
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path d="M10 2a3 3 0 00-3 3v5a3 3 0 006 0V5a3 3 0 00-3-3z"/>
+                        <path d="M5.5 9.5a.5.5 0 00-1 0V10a5.5 5.5 0 0011 0v-.5a.5.5 0 00-1 0v.5a4.5 4.5 0 01-9 0v-.5z"/>
+                        <path d="M9.5 16.5v-1h1v1H12v1H8v-1h1.5z"/>
+                      </svg>
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </>
         )}

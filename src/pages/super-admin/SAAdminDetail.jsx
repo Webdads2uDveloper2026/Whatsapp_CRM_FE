@@ -369,6 +369,26 @@ export default function SAAdminDetail() {
                     <span>{p.flow_builder ? '✅' : '❌'} Flow Builder</span>
                     <span>{p.analytics ? '✅' : '❌'} Analytics</span>
                   </div>
+                  {/* Connector / API fields */}
+                  <div style={{ borderTop: '1px solid #21262d', marginTop: 10, paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <span style={{ color: p.api_access ? '#3fb950' : '#6e7681' }}>
+                      {p.api_access ? '✅' : '❌'} API Access
+                    </span>
+                    <span style={{ color: p.webhooks_enabled ? '#3fb950' : '#6e7681' }}>
+                      {p.webhooks_enabled ? '✅' : '❌'} Webhooks
+                    </span>
+                    <span style={{ color: '#8b949e' }}>
+                      🔁 {p.api_calls_per_month === -1 ? 'Unlimited' : p.api_calls_per_month === 0 ? 'No' : (p.api_calls_per_month || 0).toLocaleString()} API calls/mo
+                    </span>
+                    <span style={{ color: p.integrations_enabled ? '#3fb950' : '#6e7681' }}>
+                      {p.integrations_enabled ? '✅' : '❌'} Integrations
+                    </span>
+                  </div>
+                  {!p.api_access && (
+                    <div style={{ marginTop: 8, color: '#e3b341', fontSize: 11 }}>
+                      ⚠ This plan has no API access — tenant won't be able to use the Connector.
+                    </div>
+                  )}
                 </div>
               ) : null
             })()}

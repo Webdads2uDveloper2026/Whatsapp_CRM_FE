@@ -11,10 +11,15 @@ const NAV = [
   { to:'/dashboard/broadcasts', emoji:'📢', label:'Broadcasts'  },
   { to:'/dashboard/templates',  emoji:'📋', label:'Templates'   },
   { to:'/dashboard/analytics',  emoji:'📊', label:'Analytics'   },
+  { to:'/dashboard/reports',    emoji:'📈', label:'Reports'     },
   { to:'/dashboard/automations',emoji:'⚡', label:'Automations' },
   { to:'/dashboard/flows',      emoji:'🔀', label:'Flows'       },
-  { to:'/dashboard/agents',     emoji:'👤', label:'Agents'      },
-  { to:'/dashboard/settings',   emoji:'⚙️', label:'Settings'    },
+  { to:'/dashboard/agents',             emoji:'👤', label:'Agents'        },
+  { to:'/dashboard/settings',           emoji:'⚙️', label:'Settings'      },
+  { to:'/dashboard/facebook-leads',     emoji:'🎯', label:'FB Leads'      },
+  { to:'/dashboard/facebook-campaigns', emoji:'📣', label:'FB Campaigns'  },
+  { to:'/dashboard/integrations',       emoji:'🔗', label:'Integrations'  },
+  { to:'/dashboard/connector',          emoji:'🔌', label:'Connector'     },
 ]
 
 export default function Layout() {

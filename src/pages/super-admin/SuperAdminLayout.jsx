@@ -5,9 +5,10 @@ import image1 from '../../assets/webdadslogo.svg'
 import image2 from '../../assets/webdadsicon.svg'
 
 const NAV = [
-  { to: '/super-admin',        emoji: '📊', label: 'Dashboard' },
-  { to: '/super-admin/admins', emoji: '🏢', label: 'Admins'    },
-  { to: '/super-admin/plans',  emoji: '💳', label: 'Plans'     },
+  { to: '/super-admin',                       emoji: '📊', label: 'Dashboard'    },
+  { to: '/super-admin/admins',                emoji: '🏢', label: 'Admins'       },
+  { to: '/super-admin/plans',                 emoji: '💳', label: 'Plans'        },
+  { to: '/super-admin/subscription-plans',    emoji: '🔌', label: 'API Plans'    },
 ]
 
 export default function SuperAdminLayout() {

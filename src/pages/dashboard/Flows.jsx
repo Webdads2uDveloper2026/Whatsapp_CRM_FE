@@ -52,7 +52,7 @@ function mkComp(type) {
     case 'input':    return { id, type, label:'Your answer', input_type:'text', required:false, placeholder:'' }
     case 'buttons':  return { id, type, buttons:[mkBtn('Continue','NAVIGATE')] }
     case 'dropdown': return { id, type, label:'Choose an option', required:false, options:[{id:`o_${uid()}`,title:'Option 1'}] }
-    case 'media':    return { id, type, media_type:'image', url:'', alt_text:'' }
+    case 'media':    return { id, type, media_type:'image', url:'', media_id:'', filename:'', alt_text:'' }
     case 'footer':   return { id, type, footer_text:'', buttons:[mkBtn('Done','COMPLETE')] }
     default:         return { id, type }
   }
@@ -248,6 +248,33 @@ const FLOW_TEMPLATES = [
       ]
     },
   },
+  {
+    id: 'product_showcase',
+    name: 'Product Showcase',
+    description: 'Highlight a product or offer with an image and capture interest',
+    category: 'OTHER',
+    icon: '🖼️',
+    makeScreens: () => {
+      const s1id = `scr_${uid()}`, s2id = `scr_${uid()}`, s3id = `scr_${uid()}`
+      return [
+        { id:s1id, title:'Featured Product', is_terminal:false, components:[
+          { id:`c_${uid()}`, type:'media', media_type:'image', url:'', media_id:'', filename:'', alt_text:'Add a product photo or banner image here' },
+          { id:`c_${uid()}`, type:'text', text:'✨ Check out our latest product!\n\nTap below to learn more or claim this offer.' },
+          { id:`c_${uid()}`, type:'buttons', buttons:[{ id:`b_${uid()}`, label:'Tell Me More', action:'NAVIGATE', next_screen:s2id }] },
+        ]},
+        { id:s2id, title:'Get the Offer', is_terminal:false, components:[
+          { id:`c_${uid()}`, type:'text', text:'Great choice! Leave your details and we\'ll send you the full offer.' },
+          { id:`c_${uid()}`, type:'input', label:'Full Name', input_type:'text', required:true, placeholder:'Your name' },
+          { id:`c_${uid()}`, type:'input', label:'Phone Number', input_type:'phone', required:true, placeholder:'+1 234 567 8900' },
+          { id:`c_${uid()}`, type:'buttons', buttons:[{ id:`b_${uid()}`, label:'Claim Offer', action:'NAVIGATE', next_screen:s3id }] },
+        ]},
+        { id:s3id, title:'All Set!', is_terminal:true, components:[
+          { id:`c_${uid()}`, type:'text', text:'🎉 You\'re on the list!\n\nWe\'ve sent the offer details your way — keep an eye on your messages.' },
+          { id:`c_${uid()}`, type:'footer', footer_text:'', buttons:[{ id:`b_${uid()}`, label:'Done', action:'COMPLETE', next_screen:'' }] },
+        ]},
+      ]
+    },
+  },
 ]
 
 // ─── Phone Preview ────────────────────────────────────────────────────────────
@@ -317,9 +344,16 @@ function PhonePreview({ screen }) {
 
                 if (comp.type === 'media') return (
                   <div key={comp.id} className="bg-white rounded-xl overflow-hidden shadow-sm max-w-[90%]">
-                    <div className="bg-slate-200 h-16 flex items-center justify-center">
-                      <span className="text-2xl">{comp.media_type==='image'?'🖼️':comp.media_type==='video'?'🎬':'📎'}</span>
-                    </div>
+                    {comp.media_type === 'image' && comp.url ? (
+                      <img src={comp.url} alt={comp.alt_text || ''} className="w-full h-28 object-cover" />
+                    ) : (
+                      <div className="bg-slate-200 h-16 flex items-center justify-center gap-1.5">
+                        <span className="text-2xl">{MEDIA_ICONS[comp.media_type] || '📎'}</span>
+                        {(comp.media_id || comp.url) && (
+                          <span className="text-[8px] text-slate-500">{comp.filename || (comp.media_id ? 'Uploaded ✓' : 'URL set ✓')}</span>
+                        )}
+                      </div>
+                    )}
                     {comp.alt_text && <p className="text-[8px] text-slate-500 px-2 py-1">{comp.alt_text}</p>}
                   </div>
                 )
@@ -373,11 +407,63 @@ function PhonePreview({ screen }) {
   )
 }
 
+// ─── MIME accept strings per media type ───────────────────────────────────────
+const MEDIA_ACCEPT = {
+  image:    'image/png,image/jpeg,image/webp',
+  video:    'video/mp4,video/3gpp',
+  audio:    'audio/aac,audio/mp4,audio/mpeg,audio/amr,audio/ogg,audio/opus',
+  document: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv',
+}
+
+const MEDIA_ICONS = { image: '🖼️', video: '🎬', audio: '🎵', document: '📄' }
+
 // ─── Component Editor ─────────────────────────────────────────────────────────
 function ComponentEditor({ comp, screens, onUpdate, onDelete, onMoveUp, onMoveDown, isFirst, isLast }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]               = useState(false)
+  const [imgError, setImgError]       = useState('')
+  const [mediaMode, setMediaMode]     = useState('url')   // 'url' | 'upload'
+  const [uploading, setUploading]     = useState(false)
+  const [uploadErr, setUploadErr]     = useState('')
+  const [uploadedName, setUploadedName] = useState('')
 
   const up = (key, val) => onUpdate({ ...comp, [key]: val })
+
+  // Image: embed as base64 data URI (flow JSON can render it without external fetch)
+  const handleImageFile = (file) => {
+    setImgError('')
+    if (!file) return
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setImgError('Only JPEG, PNG, or WebP images are supported.')
+      return
+    }
+    if (file.size > 1024 * 1024) {
+      setImgError('Image is too large — please use a file under 1MB (300KB or smaller recommended).')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => up('url', reader.result)
+    reader.onerror = () => setImgError('Could not read the file — please try again.')
+    reader.readAsDataURL(file)
+  }
+
+  // Video / audio / document: upload to Meta via /media/upload, store media_id + filename
+  const handleMediaUpload = async (file) => {
+    if (!file) return
+    setUploadErr('')
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('type', comp.media_type)
+      const res = await api.post('/media/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setUploadedName(file.name)
+      onUpdate({ ...comp, media_id: res.data.id, url: '', filename: file.name })
+    } catch (err) {
+      setUploadErr(err?.response?.data?.detail || 'Upload failed — check file type and size.')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const compDef = COMP_DEFS.find(d => d.type === comp.type)
 
@@ -387,7 +473,7 @@ function ComponentEditor({ comp, screens, onUpdate, onDelete, onMoveUp, onMoveDo
     if (comp.type === 'input')    return `${comp.label} (${comp.input_type}${comp.required?' *':''})`
     if (comp.type === 'buttons')  return comp.buttons?.map(b=>b.label).join(' · ')
     if (comp.type === 'dropdown') return `${comp.label} · ${comp.options?.length||0} options`
-    if (comp.type === 'media')    return `${comp.media_type} ${comp.url ? '— URL set' : '— no URL'}`
+    if (comp.type === 'media')    return `${comp.media_type} ${comp.url || comp.media_id ? '— set ✓' : '— not set'}`
     if (comp.type === 'footer')   return comp.footer_text || comp.buttons?.[0]?.label || 'Footer'
     return comp.type
   }
@@ -529,22 +615,101 @@ function ComponentEditor({ comp, screens, onUpdate, onDelete, onMoveUp, onMoveDo
 
           {/* MEDIA */}
           {comp.type === 'media' && (
-            <div className="space-y-2">
+            <div className="space-y-3">
+
+              {/* Type selector */}
               <div>
                 <label className="label">Media type</label>
-                <div className="flex gap-2">
-                  {['image','video','document'].map(mt => (
-                    <button key={mt} onClick={() => up('media_type', mt)}
+                <div className="flex gap-2 flex-wrap">
+                  {['image','video','audio','document'].map(mt => (
+                    <button key={mt}
+                      onClick={() => {
+                        setUploadErr(''); setUploadedName(''); setMediaMode('url')
+                        onUpdate({ ...comp, media_type: mt, url: '', media_id: '', filename: '' })
+                      }}
                       className={`flex-1 py-1.5 rounded-lg border text-xs font-medium transition-colors capitalize ${comp.media_type===mt?'bg-blue-600/20 border-blue-500/50 text-blue-300':'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                      {mt==='image'?'🖼️':mt==='video'?'🎬':'📎'} {mt}
+                      {MEDIA_ICONS[mt]} {mt}
                     </button>
                   ))}
                 </div>
               </div>
-              <div>
-                <label className="label">Media URL</label>
-                <input value={comp.url||''} onChange={e => up('url', e.target.value)} className="input text-xs" placeholder="https://example.com/image.jpg" />
-              </div>
+
+              {/* IMAGE — base64 embed (no hosting needed) */}
+              {comp.media_type === 'image' && (
+                <div>
+                  <label className="label">Image file</label>
+                  <input
+                    type="file"
+                    accept={MEDIA_ACCEPT.image}
+                    onChange={e => handleImageFile(e.target.files?.[0])}
+                    className="input text-xs file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-blue-600/20 file:text-blue-300 file:text-[11px] file:font-medium file:cursor-pointer cursor-pointer"
+                  />
+                  {imgError && <p className="text-[10px] text-red-400 mt-1">{imgError}</p>}
+                  {comp.url ? (
+                    <div className="mt-2 relative inline-block">
+                      <img src={comp.url} alt={comp.alt_text || 'Preview'} className="max-h-32 rounded-lg border border-slate-700" />
+                      <button onClick={() => up('url', '')}
+                        className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-slate-800 border border-slate-600 text-slate-400 hover:text-red-400 text-[10px] flex items-center justify-center transition-colors">✕</button>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-1">Pick JPEG/PNG/WebP (under 300 KB recommended) — embedded directly into the flow JSON.</p>
+                  )}
+                </div>
+              )}
+
+              {/* VIDEO / AUDIO / DOCUMENT — URL or upload to Meta */}
+              {['video','audio','document'].includes(comp.media_type) && (
+                <div className="space-y-2">
+                  {/* Mode toggle */}
+                  <div className="flex gap-2">
+                    {['url','upload'].map(m => (
+                      <button key={m} onClick={() => { setMediaMode(m); setUploadErr(''); setUploadedName('') }}
+                        className={`px-3 py-1 rounded-lg border text-xs font-semibold transition-colors ${mediaMode===m?'bg-blue-600/20 border-blue-500/50 text-blue-300':'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                        {m === 'url' ? '🔗 CDN URL' : '⬆ Upload File'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {mediaMode === 'url' ? (
+                    <div>
+                      <label className="label">Media URL</label>
+                      <input
+                        value={comp.url||''}
+                        onChange={e => onUpdate({ ...comp, url: e.target.value, media_id: '', filename: '' })}
+                        className="input text-xs"
+                        placeholder={comp.media_type==='video' ? 'https://example.com/video.mp4' : comp.media_type==='audio' ? 'https://example.com/audio.mp3' : 'https://example.com/file.pdf'}
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="label">Upload {comp.media_type} file</label>
+                      <input
+                        type="file"
+                        accept={MEDIA_ACCEPT[comp.media_type]}
+                        disabled={uploading}
+                        onChange={e => handleMediaUpload(e.target.files?.[0])}
+                        className="input text-xs file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-blue-600/20 file:text-blue-300 file:text-[11px] file:font-medium file:cursor-pointer cursor-pointer disabled:opacity-50"
+                      />
+                      {uploading && (
+                        <p className="text-[10px] text-blue-400 mt-1 flex items-center gap-1">
+                          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity=".3"/><path d="M22 12A10 10 0 0012 2" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                          Uploading to Meta…
+                        </p>
+                      )}
+                      {uploadErr && <p className="text-[10px] text-red-400 mt-1">⚠ {uploadErr}</p>}
+                      {comp.media_id && !uploading && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className="text-[10px] text-emerald-400">✓ Uploaded</span>
+                          <span className="text-[10px] text-slate-500">{uploadedName || comp.filename || comp.media_id}</span>
+                          <button onClick={() => { onUpdate({ ...comp, media_id: '', url: '', filename: '' }); setUploadedName('') }}
+                            className="text-[10px] text-slate-500 hover:text-red-400 transition-colors">✕ clear</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="label">Alt text / caption</label>
                 <input value={comp.alt_text||''} onChange={e => up('alt_text', e.target.value)} className="input text-xs" placeholder="Describe the media..." />
@@ -1291,6 +1456,7 @@ export default function Flows() {
                   selectedScreenId={activeScreenId}
                   onSelectScreen={id => { setActiveScreenId(id); if (id) setRightTab('edit') }}
                   onAddScreen={addScreen}
+                  onDeleteScreen={deleteScreen}
                 />
               )}
             </div>

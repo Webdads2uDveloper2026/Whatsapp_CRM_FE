@@ -20,8 +20,14 @@ function Badge({ status }) {
   )
 }
 
-const fmt     = iso => iso ? new Date(iso).toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'}) : '—'
-const fmtTime = iso => iso ? new Date(iso).toLocaleString([],{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'
+const TZ = 'Asia/Kolkata'
+// Backend may return IST-offset strings ("+05:30") or legacy naive UTC strings.
+// Ensure naive strings are treated as UTC before converting to IST for display.
+const parseUTC = iso => { if (!iso) return null; const s = /[Z+]/.test(iso.slice(-6)) ? iso : iso + 'Z'; return new Date(s) }
+const fmt     = iso => { const d = parseUTC(iso); return d ? d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',timeZone:TZ}) : '—' }
+const fmtTime = iso => { const d = parseUTC(iso); return d ? d.toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ}) : '—' }
+// Current IST time formatted for <input type="datetime-local"> min attribute
+const nowISTLocal = () => new Date().toLocaleString('sv-SE',{timeZone:TZ}).replace(' ','T').slice(0,16)
 const pct     = (n, t) => t > 0 ? Math.round((n/t)*100) : 0
 
 // ── WhatsApp Preview ──────────────────────────────────────────────────────────
@@ -713,7 +719,7 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
               ))}
               {form.scheduleType==='later' && (
                 <input type="datetime-local" value={form.scheduleTime} onChange={e=>set('scheduleTime',e.target.value)}
-                  min={new Date().toISOString().slice(0,16)} className={inp}/>
+                  min={nowISTLocal()} className={inp}/>
               )}
             </div>
           )}

@@ -6,7 +6,10 @@ console.log(BASE);
 export const api = axios.create({
   baseURL: BASE,
   timeout: 15000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
+  },
 })
 
 api.interceptors.request.use(cfg => {
