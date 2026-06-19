@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "../../services/api";
-import { useInboxSocket } from "../../hooks/useInboxSocket";
+import InboxSocketHelper from "../../services/InboxSocketHelper"
 import SendTemplateModal from "./SendTemplateModal";
 import SendFlowModal from "./SendFlowModal";
 import { Mp3Encoder } from "@breezystack/lamejs";
+import PhoneInput from "react-phone-input-2";
+import "react-phone-input-2/lib/style.css";
 
 const TZ = "Asia/Kolkata";
 
@@ -42,12 +44,14 @@ const fmt = (iso) => {
 
 const fmtRecordTime = (secs) =>
   `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+
 const RECORDER_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
   "audio/mp4",
   "audio/ogg;codecs=opus",
 ];
+
 function pickRecorderMimeType() {
   return (
     RECORDER_MIME_CANDIDATES.find((t) =>
@@ -105,6 +109,7 @@ const AVATAR_BG = [
   "bg-blue-600",
   "bg-pink-600",
 ];
+
 function avatarColor(s = "") {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h);
@@ -306,9 +311,8 @@ function MediaDocument({ c }) {
   );
 }
 
-// ── New Conversation Modal ────────────────────────────────────────────────────
 function NewConvoModal({ onClose, onCreated }) {
-  const [step, setStep] = useState("search"); // search | confirm | sending
+  const [step, setStep] = useState("search");
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [contact, setContact] = useState(null);
@@ -328,7 +332,6 @@ function NewConvoModal({ onClose, onCreated }) {
       .catch(() => {});
   }, []);
 
-  // Search existing contact by phone
   const searchContact = async () => {
     const clean = phone.replace(/[\s+\-()]/g, "");
     if (!clean || clean.length < 7) {
@@ -354,7 +357,6 @@ function NewConvoModal({ onClose, onCreated }) {
     setSearching(false);
   };
 
-  // Create contact if needed, then start conversation
   const startConversation = async () => {
     setStep("sending");
     setError("");
@@ -362,7 +364,6 @@ function NewConvoModal({ onClose, onCreated }) {
     try {
       let contactId = contact?.id;
 
-      // Create contact if not exists
       if (!contactId) {
         const { data } = await api.post("/contacts", {
           wa_id: clean,
@@ -373,7 +374,6 @@ function NewConvoModal({ onClose, onCreated }) {
         contactId = data.id;
       }
 
-      // Start conversation — find existing open or create new
       let convo = null;
       const { data: convos } = await api.get(
         `/conversations?search=${clean}&limit=10`,
@@ -385,7 +385,6 @@ function NewConvoModal({ onClose, onCreated }) {
       if (existing) {
         convo = existing;
       } else {
-        // Create conversation by sending the first template message
         if (tplId) {
           const tpl = templates.find((t) => t.id === tplId);
           const { data: msg } = await api.post("/conversations/start", {
@@ -396,7 +395,6 @@ function NewConvoModal({ onClose, onCreated }) {
           });
           convo = msg.conversation;
         } else {
-          // Create bare conversation record
           const { data: msg } = await api.post("/conversations/start", {
             wa_id: clean,
             contact_id: contactId,
@@ -422,7 +420,6 @@ function NewConvoModal({ onClose, onCreated }) {
         className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <div>
             <h2 className="text-sm font-semibold text-white">
@@ -447,41 +444,52 @@ function NewConvoModal({ onClose, onCreated }) {
             </div>
           )}
 
-          {/* Step 1 — Phone input */}
           {(step === "search" || step === "confirm") && (
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Phone number <span className="text-red-400">*</span>
-              </label>
-              <div className="flex gap-2">
-                <input
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value);
-                    setStep("search");
-                    setContact(null);
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && searchContact()}
-                  placeholder="919876543210  (country code + number)"
-                  className="flex-1 bg-slate-800 border border-slate-700 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition-colors font-mono"
-                />
-                {step === "search" && (
-                  <button
-                    onClick={searchContact}
-                    disabled={searching}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition-colors shrink-0"
-                  >
-                    {searching ? "…" : "Search"}
-                  </button>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1.5">
-                No + sign. Example: 919876543210 for India +91
-              </p>
-            </div>
+  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+    Phone number <span className="text-red-400">*</span>
+  </label>
+
+  <div className="flex gap-2">
+    <PhoneInput
+  country="in"
+  value={phone}
+  onChange={(value) => setPhone(value)}
+  enableSearch
+  searchPlaceholder="Search country..."
+  containerStyle={{
+    width: "100%",
+  }}
+  inputStyle={{
+    width: "100%",
+    height: "52px",
+    background: "#1e293b",
+    border: "1px solid #334155",
+    color: "#fff",
+    borderRadius: "14px",
+    paddingLeft: "55px",
+  }}
+  buttonStyle={{
+    background: "#1e293b",
+    border: "1px solid #334155",
+    borderTopLeftRadius: "14px",
+    borderBottomLeftRadius: "14px",
+  }}
+/>
+
+    {step === "search" && (
+      <button
+        onClick={searchContact}
+        disabled={searching}
+        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white text-xs font-semibold rounded-xl transition-colors shrink-0"
+      >
+        {searching ? "..." : "Search"}
+      </button>
+    )}
+  </div>
+</div>
           )}
 
-          {/* Step 2 — Contact found / not found */}
           {step === "confirm" && (
             <>
               {contact ? (
@@ -516,7 +524,6 @@ function NewConvoModal({ onClose, onCreated }) {
                 </div>
               )}
 
-              {/* Template selection — required if 24h window not open */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">
                   Opening message template
@@ -590,11 +597,10 @@ function NewConvoModal({ onClose, onCreated }) {
   );
 }
 
-// ── Main Inbox ────────────────────────────────────────────────────────────────
 export default function Inbox() {
   const location = useLocation();
   const navigate = useNavigate();
-
+  const [phone, setPhone] = useState("");
   const [convos, setConvos] = useState([]);
   const [selected, setSelected] = useState(null);
   const [contact, setContact] = useState(null);
@@ -617,9 +623,9 @@ export default function Inbox() {
   const [showTplModal, setShowTplModal] = useState(false);
   const [showFlowModal, setShowFlowModal] = useState(false);
   const [flows, setFlows] = useState([]);
-  const [activeMenu, setActiveMenu] = useState(null); // message id with open menu
-  const [replyTo, setReplyTo] = useState(null); // message being replied to
-  const [msgInfo, setMsgInfo] = useState(null); // message info modal
+  const [activeMenu, setActiveMenu] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
+  const [msgInfo, setMsgInfo] = useState(null);
   const [showRight, setShowRight] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
@@ -628,13 +634,12 @@ export default function Inbox() {
   const chatRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const selectedRef = useRef(null); // stable ref — avoids WS handler recreation
-  const recorderRef = useRef(null); // MediaRecorder instance
+  const selectedRef = useRef(null);
+  const recorderRef = useRef(null);
   const recordChunksRef = useRef([]);
-  const recordStreamRef = useRef(null); // mic MediaStream — stopped when recording ends
+  const recordStreamRef = useRef(null);
   const recordTimerRef = useRef(null);
 
-  // ── Load conversations ──────────────────────────────────────────────────
   const loadConvos = useCallback(() => {
     const p = new URLSearchParams({ status: statusFilter, limit: 60 });
     if (search) p.append("search", search);
@@ -648,12 +653,10 @@ export default function Inbox() {
     loadConvos();
   }, [loadConvos]);
 
-  // Keep selectedRef in sync without triggering WS reconnects
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
 
-  // ── Load messages ───────────────────────────────────────────────────────
   const loadMessages = useCallback(async (cid, pg = 1, prepend = false) => {
     setLoadingMsgs(true);
     try {
@@ -703,20 +706,14 @@ export default function Inbox() {
     [loadMessages, loadContact],
   );
 
-  // ── Deep link from Contacts "Open Chat" ──────────────────────────────────
-  // Navigates here with location.state = { wa_id, contact_id?, contact_name? }
-  // Directly opens or creates the conversation — NO modal shown
   useEffect(() => {
     const state = location.state;
     if (!state?.wa_id) return;
 
-    // Clear state immediately so back-navigation doesn't re-trigger
     window.history.replaceState({}, "");
 
     const openDirectly = async () => {
       const wa_id = state.wa_id;
-
-      // 1. Check for existing open conversation
       try {
         const { data } = await api.get(
           `/conversations?search=${wa_id}&limit=20`,
@@ -724,7 +721,6 @@ export default function Inbox() {
         const match = (data.conversations || []).find((c) => c.wa_id === wa_id);
 
         if (match) {
-          // Existing conversation found — select it directly
           setConvos((prev) =>
             prev.find((c) => c.id === match.id) ? prev : [match, ...prev],
           );
@@ -733,7 +729,6 @@ export default function Inbox() {
         }
       } catch {}
 
-      // 2. No conversation — create one silently via API
       try {
         const { data } = await api.post("/conversations/start", {
           wa_id: wa_id,
@@ -744,36 +739,31 @@ export default function Inbox() {
         if (newConvo) {
           setConvos((prev) => [newConvo, ...prev]);
           selectConvo(newConvo);
-          // Load contact details if available
           if (state.contact_id) {
             loadContact(state.contact_id);
           }
         }
       } catch (e) {
-        // Fallback — show error in console but don't crash
         console.error("[Inbox] Failed to start conversation:", e);
       }
     };
 
-    // Small delay to let convos load first
     const timer = setTimeout(openDirectly, 300);
     return () => clearTimeout(timer);
   }, [location.state]);
 
-  // Pre-fill phone in new convo modal from navigation state
   const navState = location.state;
 
-  // ── WebSocket ───────────────────────────────────────────────────────────
-  // Empty deps + refs so this callback never recreates → no WS reconnects
+  // ───────────────────────────────────────────────────────────────────────
+  // ✅ SOCKET.IO INTEGRATION REPLACEMENT
+  // ───────────────────────────────────────────────────────────────────────
   const onWsMessage = useCallback((ev) => {
     if (ev.type === "new_message") {
       const curSelected = selectedRef.current;
 
-      // Update conversation list in-place (no API call needed)
       setConvos((prev) => {
         const idx = prev.findIndex((c) => c.id === ev.conversation_id);
         if (idx === -1) {
-          // Unknown conversation — schedule a full reload and leave list unchanged
           setTimeout(() => loadConvos(), 0);
           return prev;
         }
@@ -783,11 +773,9 @@ export default function Inbox() {
           last_message_at: ev.message?.created_at || new Date().toISOString(),
           unread_count: isOpen ? 0 : (prev[idx].unread_count || 0) + 1,
         };
-        // Move to top of list
         return [updated, ...prev.filter((_, i) => i !== idx)];
       });
 
-      // Append message to open chat
       if (curSelected?.id === ev.conversation_id) {
         setMessages((p) => {
           const msgId = ev.message?.id;
@@ -817,10 +805,25 @@ export default function Inbox() {
         ),
       );
     }
-  }, []); 
+  }, []);
 
+  useEffect(() => {
+    // 1. Connect Socket.IO
+    InboxSocketHelper.connectSocket();
 
-  useInboxSocket(onWsMessage);
+    // 2. Listen to the generic message event from the backend
+    // NOTE: If your backend emits specific events like `socket.emit("new_message", data)`
+    // then you should change "message" to "new_message" below.
+    InboxSocketHelper.on("message", onWsMessage);
+
+    // 3. Cleanup
+    return () => {
+      InboxSocketHelper.off("message", onWsMessage);
+      // Optional: Drop connection when you fully leave the component
+      // InboxSocketHelper.disconnect(); 
+    };
+  }, [onWsMessage]);
+  // ───────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     api
@@ -837,7 +840,6 @@ export default function Inbox() {
       .catch(() => {});
   }, []);
 
-  // ── Send message ────────────────────────────────────────────────────────
   const handleFileAttachment = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !selected) return;
@@ -858,7 +860,6 @@ export default function Inbox() {
       });
       const mediaId = uploadRes.data.id;
       const msgPayload = { msg_type: fileType, media_id: mediaId };
-      // filename only for documents; caption omitted (empty = WhatsApp error)
       if (fileType === "document") msgPayload.filename = file.name;
       await api.post(`/conversations/${selected.id}/messages`, msgPayload);
     } catch (err) {
@@ -869,7 +870,6 @@ export default function Inbox() {
     }
   };
 
-  // ── Voice recording (record mic → upload → send as audio message) ───────
   const stopRecordingTracks = () => {
     recordStreamRef.current?.getTracks().forEach((t) => t.stop());
     recordStreamRef.current = null;
@@ -940,7 +940,7 @@ export default function Inbox() {
 
   const finishRecording = () => {
     if (!recorderRef.current) return;
-    recorderRef.current.stop(); // → triggers onstop → sendRecording
+    recorderRef.current.stop();
     stopRecordingTracks();
     setIsRecording(false);
     setRecordSecs(0);
@@ -958,7 +958,6 @@ export default function Inbox() {
     recorderRef.current = null;
   };
 
-  // Stop any in-flight recording if the user switches conversations / unmounts
   useEffect(() => () => cancelRecording(), []);
 
   const sendText = async (e) => {
@@ -976,8 +975,6 @@ export default function Inbox() {
         payload,
       );
       setReplyTo(null);
-      // Add to state immediately for instant feedback
-      // WebSocket will also broadcast but dedup check above prevents doubles
       setMessages((p) => {
         const exists = p.some(
           (m) => m.id === data.id || m.wa_message_id === data.wa_message_id,
@@ -997,14 +994,10 @@ export default function Inbox() {
   };
 
   const sendTemplate = async (tpl) => {
-    // Legacy quick-send — opens modal instead
     setShowTplModal(true);
   };
 
   const handleSendTemplate = async (payload) => {
-    // payload from SendTemplateModal:
-    // { msg_type, template_name, language, header_type, header_link,
-    //   header_media_id, header_filename, body_variables, buttons }
     if (!selected) return;
     const { data } = await api.post(
       `/conversations/${selected.id}/messages`,
@@ -1023,7 +1016,6 @@ export default function Inbox() {
   };
 
   const handleOpenFlowModal = async () => {
-    // Load published flows for the picker (falls back to empty list gracefully)
     try {
       const { data } = await api.get("/flows");
       setFlows(data?.flows || data || []);
@@ -1097,13 +1089,11 @@ export default function Inbox() {
     }
   };
 
-  // When new conversation created from modal
   const handleNewConvoCreated = async (convo, contactId) => {
     loadConvos();
     if (convo) {
       await selectConvo(convo);
     }
-    // clear navigation state
     window.history.replaceState({}, "");
   };
 
@@ -1111,137 +1101,8 @@ export default function Inbox() {
     selected?.window_expires_at &&
     new Date(selected.window_expires_at) > new Date();
 
-  // ── Message context menu ─────────────────────────────────────────────────
   const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-  const MsgMenu = ({ m, onClose }) => {
-    const isOut = m.direction === "outbound";
-
-    const sendReaction = async (emoji) => {
-      onClose();
-      try {
-        await api.post(`/conversations/${selected.id}/messages`, {
-          msg_type: "reaction",
-          content: { emoji, message_id: m.wa_message_id || m.id },
-        });
-      } catch {}
-    };
-
-    const copyText = () => {
-      const text = m.content?.body || m.content?.caption || "";
-      navigator.clipboard.writeText(text);
-      onClose();
-    };
-
-    const deleteMsg = async () => {
-      onClose();
-      if (!confirm("Delete this message?")) return;
-      try {
-        await api.delete(`/conversations/${selected.id}/messages/${m.id}`);
-        setMessages((p) => p.filter((x) => x.id !== m.id));
-      } catch (e) {
-        alert(e.response?.data?.detail || "Delete failed");
-      }
-    };
-
-    const starMsg = async () => {
-      onClose();
-      setMessages((p) =>
-        p.map((x) => (x.id === m.id ? { ...x, starred: !x.starred } : x)),
-      );
-    };
-
-    return (
-      <div
-        style={{ zIndex: 9999 }}
-        className={`fixed bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden w-56`}
-        ref={(el) => {
-          if (el) {
-            // Smart positioning: keep menu in viewport
-            const rect = el.getBoundingClientRect();
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            if (rect.right > vw) el.style.left = vw - rect.width - 8 + "px";
-            if (rect.bottom > vh)
-              el.style.top = rect.top - rect.height - 8 + "px";
-          }
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Quick emoji reactions */}
-        <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-800">
-          {QUICK_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              onClick={() => sendReaction(emoji)}
-              className="text-xl hover:scale-125 transition-transform active:scale-95"
-            >
-              {emoji}
-            </button>
-          ))}
-          <button
-            onClick={() => sendReaction("➕")}
-            className="text-slate-400 hover:text-slate-200 text-lg transition-colors"
-          >
-            +
-          </button>
-        </div>
-
-        {/* Actions */}
-        {[
-          {
-            icon: "ℹ️",
-            label: "Message info",
-            fn: () => {
-              setMsgInfo(m);
-              onClose();
-            },
-            show: true,
-          },
-          {
-            icon: "↩️",
-            label: "Reply",
-            fn: () => {
-              setReplyTo(m);
-              onClose();
-              setTimeout(() => inputRef.current?.focus(), 100);
-            },
-            show: true,
-          },
-          {
-            icon: "📋",
-            label: "Copy",
-            fn: copyText,
-            show: !!(m.content?.body || m.content?.caption),
-          },
-          {
-            icon: "⭐",
-            label: m.starred ? "Unstar" : "Star",
-            fn: starMsg,
-            show: true,
-          },
-          { icon: "🗑️", label: "Delete", fn: deleteMsg, show: true },
-        ]
-          .filter((a) => a.show)
-          .map((a) => (
-            <button
-              key={a.label}
-              onClick={a.fn}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-800 transition-colors text-left"
-            >
-              <span className="text-base w-5 text-center">{a.icon}</span>
-              <span
-                className={`text-sm ${a.label === "Delete" ? "text-red-400" : "text-slate-300"}`}
-              >
-                {a.label}
-              </span>
-            </button>
-          ))}
-      </div>
-    );
-  };
-
-  // ── Message info modal ─────────────────────────────────────────────────────
   const MsgInfoModal = ({ m, onClose }) => (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm"
@@ -1331,11 +1192,8 @@ export default function Inbox() {
   const renderBubble = (m) => {
     const isOut = m.direction === "outbound";
     const c = m.content || {};
-    // content.type carries the specific interactive sub-type (flow_response, button_reply, ...)
-    // — prefer it so older messages stored with the generic "interactive" type still render right
     const type = c.type || m.type || m.msg_type || "text";
 
-    // ── Reaction — inline pill display ────────────────────────────────────
     if (type === "reaction") {
       return (
         <div
@@ -1353,7 +1211,6 @@ export default function Inbox() {
       );
     }
 
-    // ── Bubble content per type ────────────────────────────────────────────
     const renderContent = () => {
       switch (type) {
         case "text":
@@ -1362,19 +1219,14 @@ export default function Inbox() {
               {c.body || ""}
             </p>
           );
-
         case "image":
           return <MediaImage c={c} />;
-
         case "video":
           return <MediaVideo c={c} />;
-
         case "audio":
           return <MediaAudio c={c} />;
-
         case "document":
           return <MediaDocument c={c} />;
-
         case "sticker":
           return (
             <div className="flex flex-col items-center gap-1 p-1">
@@ -1382,7 +1234,6 @@ export default function Inbox() {
               <span className="text-[9px] text-slate-500">Sticker</span>
             </div>
           );
-
         case "location":
           return (
             <div className="min-w-[160px] max-w-[220px]">
@@ -1406,7 +1257,6 @@ export default function Inbox() {
               )}
             </div>
           );
-
         case "contacts":
           return (
             <div className="flex items-center gap-2 min-w-[140px]">
@@ -1424,7 +1274,6 @@ export default function Inbox() {
               </div>
             </div>
           );
-
         case "template":
           return (
             <div>
@@ -1443,7 +1292,6 @@ export default function Inbox() {
               )}
             </div>
           );
-
         case "interactive":
         case "button":
           return (
@@ -1461,7 +1309,6 @@ export default function Inbox() {
               )}
             </div>
           );
-
         case "flow_response": {
           const entries = Object.entries(c.flow_data || {}).filter(
             ([k]) => k !== "flow_token",
@@ -1494,7 +1341,6 @@ export default function Inbox() {
             </div>
           );
         }
-
         default:
           return (
             <p className="text-[13.5px] text-slate-300">
@@ -1504,7 +1350,6 @@ export default function Inbox() {
       }
     };
 
-    // ── Reaction badges on bubble ──────────────────────────────────────────
     const reactions = m.reactions || [];
 
     return (
@@ -1522,7 +1367,6 @@ export default function Inbox() {
         <div
           className={`flex flex-col max-w-[68%] ${isOut ? "items-end" : "items-start"} relative`}
         >
-          {/* Reply quote */}
           {m.reply_to && (
             <div
               className={`text-[11px] px-3 py-1.5 rounded-xl mb-1 border-l-2 bg-slate-800/60
@@ -1539,16 +1383,13 @@ export default function Inbox() {
             </div>
           )}
 
-          {/* Starred indicator */}
           {m.starred && (
             <span className="text-[10px] text-amber-400 mb-0.5">
               ⭐ Starred
             </span>
           )}
 
-          {/* Main bubble + hover menu trigger */}
           <div className="relative flex items-start gap-1">
-            {/* Menu trigger button — left side for outbound */}
             {isOut && (
               <button
                 onClick={(e) => {
@@ -1584,7 +1425,6 @@ export default function Inbox() {
               {renderContent()}
             </div>
 
-            {/* Menu trigger button — right side for inbound */}
             {!isOut && (
               <button
                 onClick={(e) => {
@@ -1598,7 +1438,6 @@ export default function Inbox() {
             )}
           </div>
 
-          {/* Reaction badges */}
           {reactions.length > 0 && (
             <div className="flex gap-0.5 mt-0.5">
               {reactions.map((r, i) => (
@@ -1612,7 +1451,6 @@ export default function Inbox() {
             </div>
           )}
 
-          {/* Timestamp + tick */}
           <div
             className={`flex items-center gap-1 mt-1 px-1 ${isOut ? "flex-row-reverse" : ""}`}
           >
@@ -1628,10 +1466,8 @@ export default function Inbox() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
-      {/* ── LEFT: Conversation List ───────────────────────────── */}
       <aside className="w-72 xl:w-80 shrink-0 flex flex-col border-r border-slate-800 bg-slate-950">
         <div className="p-4 border-b border-slate-800 space-y-3">
-          {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h1 className="text-base font-semibold">Inbox</h1>
@@ -1639,7 +1475,6 @@ export default function Inbox() {
                 {convos.length}
               </span>
             </div>
-            {/* New Conversation button */}
             <button
               onClick={() => setShowNewConvo(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition-colors"
@@ -1656,7 +1491,6 @@ export default function Inbox() {
             </button>
           </div>
 
-          {/* Search */}
           <div className="relative">
             <svg
               className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500"
@@ -1685,7 +1519,6 @@ export default function Inbox() {
             />
           </div>
 
-          {/* Status tabs */}
           <div className="flex gap-1">
             {["open", "resolved", "bot_handling"].map((s) => (
               <button
@@ -1705,7 +1538,6 @@ export default function Inbox() {
           </div>
         </div>
 
-        {/* Convo list */}
         <div className="flex-1 overflow-y-auto">
           {convos.length === 0 && (
             <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-500">
@@ -1756,7 +1588,6 @@ export default function Inbox() {
         </div>
       </aside>
 
-      {/* ── CENTER: Chat ─────────────────────────────────────── */}
       <main className="flex-1 flex flex-col overflow-hidden border-r border-slate-800 min-w-0">
         {!selected ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-500 gap-4">
@@ -1777,7 +1608,6 @@ export default function Inbox() {
           </div>
         ) : (
           <>
-            {/* Chat header */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950/80 backdrop-blur shrink-0">
               <Avatar name={contact?.profile_name || selected.wa_id} />
               <div className="flex-1 min-w-0">
@@ -1791,7 +1621,6 @@ export default function Inbox() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {/* Window status */}
                 {selected.window_expires_at && (
                   <span
                     className={`hidden sm:flex items-center gap-1 text-xs px-2 py-1 rounded-md border
@@ -1800,7 +1629,6 @@ export default function Inbox() {
                     ⏱ {windowOpen ? "Window open" : "Window closed"}
                   </span>
                 )}
-                {/* View contact button */}
                 {contact && (
                   <button
                     onClick={() => navigate("/dashboard/contacts")}
@@ -1849,7 +1677,6 @@ export default function Inbox() {
               </div>
             </div>
 
-            {/* Messages */}
             <div
               ref={chatRef}
               className="flex-1 overflow-y-auto px-4 py-4"
@@ -1884,7 +1711,6 @@ export default function Inbox() {
               <div ref={bottomRef} />
             </div>
 
-            {/* Template picker */}
             {showTemplates && (
               <div className="border-t border-slate-800 bg-slate-900 max-h-52 flex flex-col shrink-0">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
@@ -1925,7 +1751,6 @@ export default function Inbox() {
               </div>
             )}
 
-            {/* Reply preview bar */}
             {replyTo && (
               <div className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-800 bg-slate-900/80">
                 <div className="flex-1 border-l-2 border-blue-500 pl-3">
@@ -1950,7 +1775,6 @@ export default function Inbox() {
               </div>
             )}
 
-            {/* Composer */}
             <div className="flex items-end gap-2 px-4 py-3 border-t border-slate-800 bg-slate-950/80 shrink-0">
               {isRecording ? (
                 <div className="flex-1 flex items-center gap-3 bg-slate-800 border border-rose-700/50 rounded-xl px-4 py-2.5">
@@ -1994,7 +1818,6 @@ export default function Inbox() {
                 </div>
               ) : (
                 <>
-                  {/* Hidden file input */}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -2002,7 +1825,6 @@ export default function Inbox() {
                     accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
                     onChange={handleFileAttachment}
                   />
-                  {/* Attachment button */}
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadingMedia}
@@ -2159,7 +1981,6 @@ export default function Inbox() {
         )}
       </main>
 
-      {/* ── RIGHT: Contact Details ───────────────────────────── */}
       {selected && showRight && (
         <aside className="w-72 shrink-0 flex flex-col bg-slate-950 border-l border-slate-800 overflow-hidden">
           <div className="flex flex-col items-center gap-2 pt-6 pb-4 px-4 border-b border-slate-800">
@@ -2197,7 +2018,6 @@ export default function Inbox() {
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
             {rightTab === "details" && (
               <>
-                {/* Edit toggle */}
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                     Contact info
@@ -2301,7 +2121,6 @@ export default function Inbox() {
                   </div>
                 )}
 
-                {/* Tags */}
                 {(contact?.tags || []).length > 0 && (
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
@@ -2320,7 +2139,6 @@ export default function Inbox() {
                   </div>
                 )}
 
-                {/* Assign */}
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
                     Assign agent
@@ -2339,7 +2157,6 @@ export default function Inbox() {
                   </select>
                 </div>
 
-                {/* Actions */}
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
                     Actions
@@ -2389,11 +2206,8 @@ export default function Inbox() {
         </aside>
       )}
 
-      {/* New Conversation Modal */}
-      {/* Message Info Modal */}
       {msgInfo && <MsgInfoModal m={msgInfo} onClose={() => setMsgInfo(null)} />}
 
-      {/* Global message menu overlay — renders outside chat scroll area */}
       {activeMenu &&
         messages.find((m) => m.id === activeMenu) &&
         (() => {
@@ -2413,7 +2227,6 @@ export default function Inbox() {
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Quick emoji reactions */}
                 <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-800">
                   {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
                     <button
@@ -2440,7 +2253,6 @@ export default function Inbox() {
                   ))}
                   <span className="text-slate-400 text-lg">+</span>
                 </div>
-                {/* Actions */}
                 {[
                   {
                     icon: "ℹ️",
@@ -2518,7 +2330,6 @@ export default function Inbox() {
           );
         })()}
 
-      {/* Send Template Modal */}
       {showTplModal && selected && (
         <SendTemplateModal
           onClose={() => setShowTplModal(false)}

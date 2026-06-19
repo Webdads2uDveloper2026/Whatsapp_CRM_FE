@@ -23,3 +23,67 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
 }
+
+/* Modal-style country list */
+.react-tel-input .country-list {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+
+  width: 400px !important;
+  max-height: 450px !important;
+
+  background: #0f172a !important;
+  border: 1px solid #334155 !important;
+  border-radius: 16px !important;
+
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6) !important;
+  z-index: 99999 !important;
+  overflow-y: auto !important;
+}
+
+/* Search box */
+.react-tel-input .search-box {
+  width: calc(100% - 30px) !important;
+  height: 42px !important;
+  border-radius: 10px !important;
+  border: 1px solid #334155 !important;
+  background: #1e293b !important;
+  font-size: 14px !important;
+}
+
+/* Country items */
+.react-tel-input .country-list .country {
+  color: white !important;
+  padding: 12px 16px !important;
+}
+
+/* Hover */
+.react-tel-input .country-list .country:hover {
+  background: #1e293b !important;
+}
+
+/* Selected */
+.react-tel-input .country-list .country.highlight {
+  background: #2563eb !important;
+  color: white !important;
+}
+
+/* Dial code */
+.react-tel-input .country-list .country .dial-code {
+  color: #94a3b8 !important;
+}
+
+/* Remove search icon */
+.react-tel-input .search-box {
+  background-image: none !important;
+  padding-left: 12px !important;
+}
+
+/* Hide search emoji/icon if present */
+.react-tel-input .search-emoji,
+.react-tel-input .search span,
+.react-tel-input .search svg {
+  display: none !important;
+}
