@@ -31,6 +31,38 @@ const CAT_CFG = {
   AUTHENTICATION: { cls:'bg-orange-50 text-orange-700 border-orange-200', icon:'🔐' },
 }
 
+// Category-driven form behaviour (mirrors WATI: fields adapt to the category).
+//   headers  → which header types are offered
+//   buttons  → which button types can be added
+//   types    → Marketing shows a template-type selector (Standard/Carousel/…)
+const CAT_RULES = {
+  MARKETING: {
+    note:    'Promotions, offers and announcements. Needs opt-in; recipients can mark as spam.',
+    headers: ['none', 'text', 'image', 'video', 'document'],
+    buttons: ['QUICK_REPLY', 'URL', 'PHONE_NUMBER', 'COPY_CODE'],
+    types:   ['STANDARD', 'CAROUSEL', 'CATALOG', 'LIMITED_TIME_OFFER'],
+  },
+  UTILITY: {
+    note:    'Transactional updates tied to a user action — orders, receipts, alerts.',
+    headers: ['none', 'text', 'image', 'document'],
+    buttons: ['QUICK_REPLY', 'URL', 'PHONE_NUMBER'],
+    types:   null,
+  },
+  AUTHENTICATION: {
+    note:    'One-time passcodes. Meta enforces a fixed format — keep the body to the code only and use a Copy-code button.',
+    headers: ['none'],
+    buttons: ['COPY_CODE'],
+    types:   null,
+  },
+}
+
+const MKT_TYPE_CFG = {
+  STANDARD:           { icon:'📄', label:'Standard',   soon:false },
+  CAROUSEL:           { icon:'🎠', label:'Carousel',   soon:true  },
+  CATALOG:            { icon:'🛍️', label:'Catalog',    soon:true  },
+  LIMITED_TIME_OFFER: { icon:'⏳', label:'Limited-time offer', soon:true },
+}
+
 const fmt = iso => iso ? new Date(iso).toLocaleDateString([],{day:'numeric',month:'short',year:'numeric'}) : '—'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -623,15 +655,25 @@ function WaPhone({ form = {} }) {
                       </div>
                     )}
                     {form.header_type === 'image' && (
-                      <div className="w-full h-28 bg-gradient-to-br from-slate-200 to-slate-300 flex flex-col items-center justify-center gap-1">
-                        <span className="text-2xl opacity-60">🖼️</span>
-                        <span className="text-[9px] text-slate-500">Image</span>
-                      </div>
+                      form.header_media_preview ? (
+                        <img src={form.header_media_preview} alt="header"
+                          className="w-full h-28 object-cover"/>
+                      ) : (
+                        <div className="w-full h-28 bg-gradient-to-br from-slate-200 to-slate-300 flex flex-col items-center justify-center gap-1">
+                          <span className="text-2xl opacity-60">🖼️</span>
+                          <span className="text-[9px] text-slate-500">Image</span>
+                        </div>
+                      )
                     )}
                     {form.header_type === 'video' && (
-                      <div className="w-full h-28 bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center">
-                        <span className="text-3xl text-white/70">▶</span>
-                      </div>
+                      form.header_media_preview ? (
+                        <video src={form.header_media_preview} muted playsInline
+                          className="w-full h-28 object-cover bg-black"/>
+                      ) : (
+                        <div className="w-full h-28 bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center">
+                          <span className="text-3xl text-white/70">▶</span>
+                        </div>
+                      )
                     )}
                     {form.header_type === 'document' && (
                       <div className="flex items-center gap-2.5 px-3 py-2 bg-blue-50 border-b border-blue-100">
@@ -850,6 +892,11 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
 
   const uploadHeaderFile = async (file) => {
     setHeaderUploading(true); setHeaderHandle(''); setHeaderFileName('')
+    // Show the actual selected file in the live preview immediately (local blob URL)
+    try {
+      const localUrl = URL.createObjectURL(file)
+      setForm(p => ({ ...p, header_media_preview: localUrl, header_doc_name: file.name }))
+    } catch { /* ignore */ }
     try {
       const fd = new FormData()
       fd.append('file', file)
@@ -870,6 +917,7 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
   const [form, setForm] = useState(libForm ? {
     name:            libForm.name || '',
     category:        libForm.category || 'MARKETING',
+    marketing_type:  'STANDARD',
     language:        libForm.language || 'en_US',
     header_type:     libForm.header_type || 'none',
     header_text:     libForm.header_text || '',
@@ -887,6 +935,7 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
   } : {
     name:         prefill?.name ? `${prefill.name}_copy` : '',
     category:     prefill?.category  || 'MARKETING',
+    marketing_type: 'STANDARD',
     language:     prefill?.language  || 'en_US',
     header_type:  'none',
     header_text:  '',
@@ -899,6 +948,21 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
   })
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  // Category-driven rules (WATI-style dynamic fields)
+  const rules = CAT_RULES[form.category] || CAT_RULES.UTILITY
+
+  // Switching category: drop a header/buttons no longer allowed for it
+  const setCategory = (cat) => setForm(p => {
+    const r = CAT_RULES[cat] || CAT_RULES.UTILITY
+    return {
+      ...p,
+      category:       cat,
+      marketing_type: 'STANDARD',
+      header_type:    r.headers.includes(p.header_type) ? p.header_type : 'none',
+      buttons:        (p.buttons || []).filter(b => r.buttons.includes((b.type || '').toUpperCase())),
+    }
+  })
 
   // Extract variable placeholders from body
   const bodyVars = useMemo(() => {
@@ -981,13 +1045,14 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
   }
 
   const previewForm = {
-    body_text:       form.body_text,
-    footer_text:     form.footer_text,
-    header_type:     form.header_type,
-    header_text:     form.header_text,
-    header_doc_name: form.header_doc_name,
-    variables:       form.variables,
-    buttons:         form.buttons.map(b => ({ type:b.type.toLowerCase(), text:b.text })),
+    body_text:            form.body_text,
+    footer_text:          form.footer_text,
+    header_type:          form.header_type,
+    header_text:          form.header_text,
+    header_doc_name:      form.header_doc_name,
+    header_media_preview: form.header_media_preview,
+    variables:            form.variables,
+    buttons:              form.buttons.map(b => ({ type:b.type.toLowerCase(), text:b.text })),
   }
 
   // Input styles
@@ -1058,13 +1123,41 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
                     {CATEGORIES.map(c => (
                       <label key={c} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all
                         ${form.category===c?'border-blue-500 bg-blue-50':'border-slate-200 hover:border-slate-300'}`}>
-                        <input type="radio" name="cat" checked={form.category===c} onChange={()=>set('category',c)} className="accent-blue-600"/>
+                        <input type="radio" name="cat" checked={form.category===c} onChange={()=>setCategory(c)} className="accent-blue-600"/>
                         <div>
                           <p className="text-xs font-bold text-slate-700">{CAT_CFG[c].icon} {c}</p>
                         </div>
                       </label>
                     ))}
                   </div>
+                  {/* Category-specific hint */}
+                  <p className="text-[11px] text-slate-500 mt-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    {rules.note}
+                  </p>
+
+                  {/* Marketing-only: template type selector (like WATI) */}
+                  {rules.types && (
+                    <div className="mt-3">
+                      <label className={lbl}>Select Marketing template</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {rules.types.map(t => {
+                          const cfg = MKT_TYPE_CFG[t]
+                          const active = form.marketing_type === t
+                          return (
+                            <button key={t} type="button" disabled={cfg.soon}
+                              onClick={() => !cfg.soon && set('marketing_type', t)}
+                              className={`relative py-2 px-3 rounded-xl border-2 text-xs font-semibold text-left transition-all
+                                ${active ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                  : cfg.soon ? 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
+                                  : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                              <span className="mr-1">{cfg.icon}</span>{cfg.label}
+                              {cfg.soon && <span className="absolute top-1 right-1.5 text-[8px] text-slate-400">soon</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1099,8 +1192,9 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
                       { v:'none',     icon:'—',  label:'None'     },
                       { v:'text',     icon:'T',  label:'Text'     },
                       { v:'image',    icon:'🖼', label:'Image'    },
+                      { v:'video',    icon:'🎥', label:'Video'    },
                       { v:'document', icon:'📄', label:'Document' },
-                    ].map(o => (
+                    ].filter(o => rules.headers.includes(o.v)).map(o => (
                       <button key={o.v} type="button" onClick={()=>set('header_type',o.v)}
                         className={`py-2 px-3 rounded-xl border-2 text-xs font-semibold transition-all
                           ${form.header_type===o.v?'border-blue-500 bg-blue-50 text-blue-700':'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
@@ -1238,7 +1332,8 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
                         { type:'QUICK_REPLY',   label:'Quick Reply', icon:'↩' },
                         { type:'URL',           label:'URL',         icon:'🔗' },
                         { type:'PHONE_NUMBER',  label:'Call',        icon:'📞' },
-                      ].map(b => (
+                        { type:'COPY_CODE',     label:'Copy Code',   icon:'📋' },
+                      ].filter(b => rules.buttons.includes(b.type)).map(b => (
                         <button key={b.type} type="button"
                           onClick={() => setForm(p=>({...p,buttons:[...p.buttons,{type:b.type,text:'',url:'',phone:''}]}))}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-400 text-slate-600 text-xs font-semibold rounded-lg transition-colors">

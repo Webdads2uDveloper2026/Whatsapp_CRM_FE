@@ -21,6 +21,20 @@
 import { useState, useEffect, useMemo } from 'react'
 import api from '../../services/api'
 
+/**
+ * The approved media URL stored on a template's HEADER component.
+ * Meta returns it under example.header_handle (array) or example.header_url.
+ * This is the image/video/document that goes out with every send — it is
+ * fixed by the template and not customised per-message (same as WATI).
+ */
+function templateHeaderMedia(headerComp) {
+  const ex = headerComp?.example
+  if (!ex) return ''
+  const pick = v => (Array.isArray(v) ? v[0] : v)
+  const url  = pick(ex.header_handle) || pick(ex.header_url) || ''
+  return typeof url === 'string' && url.startsWith('http') ? url : ''
+}
+
 export default function SendTemplateModal({ onClose, onSend }) {
   const [templates,  setTemplates]  = useState([])
   const [selected,   setSelected]   = useState(null)
@@ -29,8 +43,7 @@ export default function SendTemplateModal({ onClose, onSend }) {
   const [error,      setError]      = useState('')
 
   // Runtime values the user fills in
-  const [headerLink, setHeaderLink] = useState('')
-  const [variables,  setVariables]  = useState({})  // { "first_name": "", "1": "" }
+  const [variables,  setVariables]  = useState({})   // { "first_name": "", "1": "" }
   const [search,     setSearch]     = useState('')
 
   useEffect(() => {
@@ -54,13 +67,16 @@ export default function SendTemplateModal({ onClose, onSend }) {
   const hasMedia   = ['image', 'video', 'document'].includes(headerFmt)
   const hasText    = headerFmt === 'text'
   const hasVars    = bodyVars.length > 0
+
+  // The template's OWN approved header media — the recipient always gets this
+  // image/video/document; it is NOT customised at send time (matches WATI).
+  const headerMediaUrl = useMemo(() => templateHeaderMedia(headerComp), [headerComp])
+
   const canSend    = selected && (!hasVars || bodyVars.every(v => variables[v]?.trim()))
-                     && (!hasMedia || headerLink.trim())
 
   const handleSelect = tpl => {
     setSelected(tpl)
     setVariables({})
-    setHeaderLink('')
     setError('')
   }
 
@@ -74,13 +90,15 @@ export default function SendTemplateModal({ onClose, onSend }) {
       bodyVars.forEach(v => { if (variables[v]) orderedVars[v] = variables[v] })
 
       const payload = {
-        msg_type:      'template',
-        template_name: selected.name,
-        language:      selected.language || 'en_US',
-        header_type:   headerFmt,
-        header_link:   hasMedia ? headerLink : '',
-        body_variables: hasVars ? orderedVars : {},
-        buttons:       [],
+        msg_type:        'template',
+        template_name:   selected.name,
+        language:        selected.language || 'en_US',
+        header_type:     headerFmt,
+        // Media header: always reuse the template's own approved media (no customisation)
+        header_media_id: '',
+        header_link:     hasMedia ? headerMediaUrl : '',
+        body_variables:  hasVars ? orderedVars : {},
+        buttons:         [],
       }
       await onSend(payload)
       onClose()
@@ -125,11 +143,17 @@ export default function SendTemplateModal({ onClose, onSend }) {
                   <div className="px-2.5 pt-2 pb-0.5 text-[10px] font-bold text-slate-800">{headerComp.text}</div>
                 )}
                 {hasMedia && (
-                  <div className="w-full h-16 bg-slate-200 flex items-center justify-center">
-                    <span className="text-xl opacity-50">
-                      {headerFmt === 'image' ? '🖼️' : headerFmt === 'video' ? '🎥' : '📄'}
-                    </span>
-                  </div>
+                  headerMediaUrl && headerFmt === 'image' ? (
+                    <img src={headerMediaUrl} alt="header" className="w-full h-16 object-cover"/>
+                  ) : headerMediaUrl && headerFmt === 'video' ? (
+                    <video src={headerMediaUrl} muted playsInline className="w-full h-16 object-cover bg-black"/>
+                  ) : (
+                    <div className="w-full h-16 bg-slate-200 flex items-center justify-center">
+                      <span className="text-xl opacity-50">
+                        {headerFmt === 'image' ? '🖼️' : headerFmt === 'video' ? '🎥' : '📄'}
+                      </span>
+                    </div>
+                  )
                 )}
                 {/* Body */}
                 <div className="px-2.5 py-2">
@@ -252,19 +276,31 @@ export default function SendTemplateModal({ onClose, onSend }) {
                     ) : null
                   })()}
 
-                  {/* Media header URL */}
+                  {/* Media header — fixed by the template, not customisable (like WATI) */}
                   {hasMedia && (
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">
-                        {headerFmt.charAt(0).toUpperCase() + headerFmt.slice(1)} URL <span className="text-red-400">*</span>
+                        {headerFmt.charAt(0).toUpperCase() + headerFmt.slice(1)} header
                       </label>
-                      <input
-                        value={headerLink}
-                        onChange={e => setHeaderLink(e.target.value)}
-                        placeholder={`Public ${headerFmt} URL (https://…)`}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 placeholder-slate-400"
-                      />
-                      <p className="text-[10px] text-slate-400 mt-1">Must be a publicly accessible URL</p>
+                      {headerMediaUrl ? (
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          {headerFmt === 'image' ? (
+                            <img src={headerMediaUrl} alt="template header" className="w-full max-h-44 object-contain bg-slate-50"/>
+                          ) : headerFmt === 'video' ? (
+                            <video src={headerMediaUrl} controls className="w-full max-h-44 bg-black"/>
+                          ) : (
+                            <a href={headerMediaUrl} target="_blank" rel="noreferrer"
+                              className="flex items-center gap-2 px-4 py-3 text-sm text-blue-600">📄 View document</a>
+                          )}
+                          <p className="text-[10px] text-slate-400 px-3 py-2 border-t border-slate-100">
+                            Uses the template's approved {headerFmt} — sent automatically, no customisation.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          This template's {headerFmt} isn't stored locally — run <b>Sync</b> in Templates to fetch it.
+                        </p>
+                      )}
                     </div>
                   )}
 
