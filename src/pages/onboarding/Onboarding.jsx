@@ -97,6 +97,10 @@ export default function Onboarding() {
   const [showManual, setShowManual] = useState(false)
   const [result, setResult]         = useState(null)
   const [profile, setProfile]       = useState(null)
+  const [connectionType, setConnectionType] = useState('cloud')  // UI hint sent to backend
+  const [selecting, setSelecting]   = useState(false)            // multi-number pick step
+  const [numbers, setNumbers]       = useState([])
+  const [chosenId, setChosenId]     = useState('')
   const [manual, setManual]         = useState({ waba_id: '', phone_number_id: '', access_token: '' })
   const sessionRef                  = useRef({ waba_id: '', phone_number_id: '' })
   const listenerRef                 = useRef(null)
@@ -202,17 +206,20 @@ export default function Onboarding() {
   const resetToConnect = () => {
     setProcessing(false)
     setProcDone(false)
+    setSelecting(false)
+    setNumbers([])
     setError('')
     setConnecting(false)
     setProcSteps(PROC_STEPS.map(s => ({ ...s, status: 'pending' })))
   }
 
   // ── Meta Embedded Signup ─────────────────────────────────────────────────
-  const handleFacebookConnect = () => {
+  const handleFacebookConnect = (type = 'cloud') => {
     if (!sdkReady)    { setError('Facebook SDK not loaded yet. Please wait a moment.'); return }
     if (!CONFIG_ID)   { setError('Configuration error: VITE_META_CONFIG_ID is missing.'); return }
     if (!META_APP_ID) { setError('Configuration error: VITE_META_APP_ID is missing.'); return }
 
+    setConnectionType(type)
     setConnecting(true)
     setError('')
     sessionRef.current = { waba_id: '', phone_number_id: '' }
@@ -229,8 +236,11 @@ export default function Onboarding() {
         const d = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data
         if (d.type !== 'WA_EMBEDDED_SIGNUP') return
 
-        if (d.event === 'FINISH') {
-          // Full signup: both WABA and phone number created/selected
+        if (d.event === 'FINISH' || d.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING') {
+          // Full signup: both WABA and phone number created/selected.
+          // FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING = Coexistence (the number
+          // stays live in the WhatsApp Business App). Same payload shape;
+          // backend detects coexistence via is_on_biz_app and skips registration.
           sessionRef.current.waba_id         = d.data?.waba_id         || ''
           sessionRef.current.phone_number_id = d.data?.phone_number_id || ''
         }
@@ -274,7 +284,19 @@ export default function Onboarding() {
               access_token:    accessToken,
               waba_id,
               phone_number_id,
+              connection_type: type,
             })
+            if (data.status === 'select_number') {
+              // WABA has multiple numbers — stop the animation and show the picker
+              timeoutsRef.current.forEach(clearTimeout)
+              timeoutsRef.current = []
+              setProcessing(false)
+              setConnecting(false)
+              setNumbers(data.numbers || [])
+              setChosenId(data.numbers?.[0]?.phone_number_id || '')
+              setSelecting(true)
+              return
+            }
             finishProcessing(true)
             await new Promise(r => setTimeout(r, 900))
             setResult(data)
@@ -301,7 +323,7 @@ export default function Onboarding() {
       override_default_response_type: true,
       extras: {
         sessionInfoVersion: 3,
-        featureType:        '',
+        featureType:        type === 'coexistence' ? 'whatsapp_business_app_onboarding' : '',
         setup:              {},
       },
     })
@@ -322,6 +344,28 @@ export default function Onboarding() {
       setProcessing(false)
     } catch (err) {
       finishProcessing(false, err.response?.data?.detail || 'Manual connection failed. Check your credentials.')
+    }
+  }
+
+  // ── confirm a number from a multi-number WABA ────────────────────────────
+  const handleSelectNumber = async () => {
+    if (!chosenId) { setError('Please select a phone number to continue.'); return }
+    setError('')
+    setConnecting(true)
+    setSelecting(false)
+    startProcessing()
+    try {
+      const { data } = await api.post('/onboarding/select-number', {
+        phone_number_id: chosenId,
+        connection_type: connectionType,
+      })
+      finishProcessing(true)
+      await new Promise(r => setTimeout(r, 900))
+      setResult(data)
+      setStep(3)
+      setProcessing(false)
+    } catch (err) {
+      finishProcessing(false, err.response?.data?.detail || 'Could not connect the selected number. Please try again.')
     }
   }
 
@@ -346,11 +390,12 @@ export default function Onboarding() {
             onNext={() => setStep(2)}
           />
         )}
-        {step === 2 && !processing && (
+        {step === 2 && !processing && !selecting && (
           <StepConnect
             sdkReady={sdkReady}
             sdkError={sdkError}
             connecting={connecting}
+            connectionType={connectionType}
             error={error}
             showManual={showManual}
             manual={manual}
@@ -360,6 +405,17 @@ export default function Onboarding() {
             onFacebook={handleFacebookConnect}
             onManual={handleManual}
             onRetrySdk={retrySdk}
+          />
+        )}
+        {step === 2 && !processing && selecting && (
+          <StepSelectNumber
+            numbers={numbers}
+            chosenId={chosenId}
+            setChosenId={setChosenId}
+            connecting={connecting}
+            error={error}
+            onConfirm={handleSelectNumber}
+            onBack={resetToConnect}
           />
         )}
         {step === 2 && processing && (
@@ -474,7 +530,7 @@ function StepAccount({ profile, onNext }) {
 }
 
 // ─── Step 2: Connect WhatsApp ─────────────────────────────────────────────
-function StepConnect({ sdkReady, sdkError, connecting, error, showManual, manual, setManual, setShowManual, setError, onFacebook, onManual, onRetrySdk }) {
+function StepConnect({ sdkReady, sdkError, connecting, connectionType, error, showManual, manual, setManual, setShowManual, setError, onFacebook, onManual, onRetrySdk }) {
   return (
     <div style={S.card}>
       <div style={S.cardLeft}>
@@ -558,20 +614,41 @@ function StepConnect({ sdkReady, sdkError, connecting, error, showManual, manual
               </div>
             )}
 
-            <button
-              onClick={onFacebook}
-              disabled={!sdkReady || connecting || sdkError}
-              style={{
-                ...S.fbBtn,
-                background: (!sdkReady || connecting || sdkError) ? '#21262d' : '#1877F2',
-                color:      (!sdkReady || connecting || sdkError) ? '#6e7681' : '#fff',
-                cursor:     (!sdkReady || connecting || sdkError) ? 'not-allowed' : 'pointer',
-              }}>
-              {connecting
-                ? <><Spinner size={16} /><span style={{ marginLeft: 10 }}>Opening Facebook…</span></>
-                : <><FbIcon /><span style={{ marginLeft: 10 }}>Continue with Facebook</span></>
-              }
-            </button>
+            <div style={S.permBox}>
+              <p style={{ ...S.permTitle, letterSpacing: 'normal', textTransform: 'none', fontSize: 12, color: '#c9d1d9' }}>
+                Is this number already active on the WhatsApp Business App on your phone?
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
+                <button
+                  onClick={() => onFacebook('cloud')}
+                  disabled={!sdkReady || connecting || sdkError}
+                  style={{
+                    ...S.fbBtn,
+                    background: (!sdkReady || connecting || sdkError) ? '#21262d' : '#1877F2',
+                    color:      (!sdkReady || connecting || sdkError) ? '#6e7681' : '#fff',
+                    cursor:     (!sdkReady || connecting || sdkError) ? 'not-allowed' : 'pointer',
+                  }}>
+                  {connecting && connectionType === 'cloud'
+                    ? <><Spinner size={16} /><span style={{ marginLeft: 10 }}>Opening Facebook…</span></>
+                    : <><FbIcon /><span style={{ marginLeft: 10 }}>No — set up a new Cloud API number</span></>
+                  }
+                </button>
+                <button
+                  onClick={() => onFacebook('coexistence')}
+                  disabled={!sdkReady || connecting || sdkError}
+                  style={{
+                    ...S.fbBtn,
+                    background: (!sdkReady || connecting || sdkError) ? '#21262d' : '#25D366',
+                    color:      (!sdkReady || connecting || sdkError) ? '#6e7681' : '#0d1117',
+                    cursor:     (!sdkReady || connecting || sdkError) ? 'not-allowed' : 'pointer',
+                  }}>
+                  {connecting && connectionType === 'coexistence'
+                    ? <><Spinner size={16} color="#0d1117" /><span style={{ marginLeft: 10 }}>Opening Facebook…</span></>
+                    : <><FbIcon /><span style={{ marginLeft: 10 }}>Yes — keep the app running, connect API too</span></>
+                  }
+                </button>
+              </div>
+            </div>
 
             <div style={S.permBox}>
               <p style={S.permTitle}>Permissions you'll grant</p>
@@ -697,6 +774,116 @@ function StepConnect({ sdkReady, sdkError, connecting, error, showManual, manual
             </button>
           </form>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Step 2.75: Select Number (multi-number WABA) ──────────────────────────
+const QUALITY_COLORS = {
+  GREEN:   { label: 'High',    color: '#3fb950' },
+  YELLOW:  { label: 'Medium',  color: '#d29922' },
+  RED:     { label: 'Low',     color: '#f85149' },
+  UNKNOWN: { label: 'Unknown', color: '#8b949e' },
+}
+
+function StepSelectNumber({ numbers, chosenId, setChosenId, connecting, error, onConfirm, onBack }) {
+  return (
+    <div style={S.card}>
+      <div style={S.cardLeft}>
+        <div style={S.stepLabel}>Step 2 of 3</div>
+        <h2 style={S.cardTitle}>Choose a Number</h2>
+        <p style={S.cardDesc}>
+          This WhatsApp Business Account has more than one phone number. Pick the one
+          you want to connect now — you can add the others later.
+        </p>
+        <div style={S.infoBox}>
+          <span style={S.infoIcon}>ℹ</span>
+          <p style={S.infoText}>
+            Numbers already active in the WhatsApp Business App (Coexistence) stay live
+            on the phone — connecting the API won't interrupt them.
+          </p>
+        </div>
+      </div>
+
+      <div style={S.cardRight}>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e6edf3' }}>
+          Select a phone number
+        </h3>
+
+        {error && (
+          <div style={S.errorBox}>
+            <span style={{ fontSize: 13, color: '#f85149', fontWeight: 600 }}>⚠ {error}</span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {numbers.map(n => {
+            const q        = n.quality_rating ? QUALITY_COLORS[n.quality_rating] : null
+            const selected = chosenId === n.phone_number_id
+            return (
+              <button
+                key={n.phone_number_id}
+                type="button"
+                onClick={() => setChosenId(n.phone_number_id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                  background:   selected ? 'rgba(56,139,253,.08)' : 'rgba(255,255,255,.02)',
+                  border:       `1px solid ${selected ? '#388bfd' : '#21262d'}`,
+                  borderRadius: 12, padding: '14px 16px', transition: 'all .15s',
+                }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                  border: `2px solid ${selected ? '#388bfd' : '#484f58'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {selected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#388bfd' }} />}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#e6edf3' }}>
+                    {n.verified_name || n.display_phone_number || n.phone_number_id}
+                  </p>
+                  <p style={{ margin: '2px 0 0', fontSize: 11, color: '#7d8590' }}>
+                    {n.display_phone_number}
+                  </p>
+                  {n.recommended_action && (
+                    <p style={{ margin: '4px 0 0', fontSize: 11, color: n.is_on_biz_app ? '#25D366' : '#388bfd' }}>
+                      {n.recommended_action}
+                    </p>
+                  )}
+                </div>
+
+                {q && (
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, color: q.color, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: q.color }} />
+                    {q.label}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        <button
+          onClick={onConfirm}
+          disabled={connecting || !chosenId}
+          style={{
+            ...S.primaryBtn, marginTop: 4,
+            opacity: (connecting || !chosenId) ? 0.6 : 1,
+            cursor:  (connecting || !chosenId) ? 'not-allowed' : 'pointer',
+          }}>
+          {connecting
+            ? <><Spinner size={16} /><span style={{ marginLeft: 8 }}>Connecting…</span></>
+            : 'Confirm & Connect'}
+        </button>
+        <button type="button" onClick={onBack} style={S.linkBtn}>
+          ← Back
+        </button>
       </div>
     </div>
   )

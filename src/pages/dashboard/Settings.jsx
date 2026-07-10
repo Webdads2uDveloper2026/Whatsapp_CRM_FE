@@ -44,6 +44,8 @@ export default function Settings() {
   const [phoneStatus, setPhoneStatus]         = useState(null)   // { phones, waba_id }
   const [phoneStatusLoading, setPhoneStatusLoading] = useState(false)
   const [phoneStatusError, setPhoneStatusError]     = useState('')
+  const [registeringPhone, setRegisteringPhone]     = useState(false)
+  const [registerPhoneError, setRegisterPhoneError] = useState('')
 
   // editable form state
   const [userForm,    setUserForm]    = useState({ business_name: '' })
@@ -81,6 +83,25 @@ export default function Settings() {
       setPhoneStatusError(err.response?.data?.detail || 'Could not fetch phone status from Meta.')
     } finally {
       setPhoneStatusLoading(false)
+    }
+  }
+
+  const registerPhone = async () => {
+    setRegisteringPhone(true)
+    setRegisterPhoneError('')
+    try {
+      await api.post('/onboarding/register-phone')
+      // Success — refresh the live status so the badge flips Pending → Connected
+      await loadPhoneStatus()
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      if (detail && typeof detail === 'object') {
+        setRegisterPhoneError(detail)   // { headline, hint, code, meta_message }
+      } else {
+        setRegisterPhoneError({ headline: detail || 'Phone registration failed. Please try again.', hint: '', code: null })
+      }
+    } finally {
+      setRegisteringPhone(false)
     }
   }
 
@@ -353,6 +374,10 @@ export default function Settings() {
                   loading={phoneStatusLoading}
                   error={phoneStatusError}
                   onRefresh={loadPhoneStatus}
+                  onRegisterPhone={registerPhone}
+                  registeringPhone={registeringPhone}
+                  registerPhoneError={registerPhoneError}
+                  isCoexistence={phoneStatus?.is_coexistence ?? profile?.is_coexistence ?? false}
                 />
 
                 {disconnectError && (
@@ -560,7 +585,7 @@ export default function Settings() {
 }
 
 // ─── Phone status panel ───────────────────────────────────────────────────────
-function PhoneStatusPanel({ phones, wabaId, activePhoneId, loading, error, onRefresh }) {
+function PhoneStatusPanel({ phones, wabaId, activePhoneId, loading, error, onRefresh, onRegisterPhone, registeringPhone, registerPhoneError, isCoexistence }) {
   const NAME_STATUS = {
     APPROVED:              { label: 'Approved',        color: '#3fb950' },
     PENDING_REVIEW:        { label: 'Pending review',  color: '#d29922' },
@@ -574,8 +599,22 @@ function PhoneStatusPanel({ phones, wabaId, activePhoneId, loading, error, onRef
     <div style={{ marginBottom: 16 }}>
       {/* header row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          Phone Numbers
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+            Phone Numbers
+          </span>
+          <span title={isCoexistence
+              ? 'Coexistence — this number is also live in the WhatsApp Business App'
+              : 'Cloud API — this number is managed entirely through the Cloud API'}
+            style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+              textTransform: 'uppercase', letterSpacing: '.04em',
+              background: isCoexistence ? 'rgba(31,111,235,.12)' : 'rgba(37,211,102,.12)',
+              color:      isCoexistence ? '#589bff' : '#3fb950',
+              border:     `1px solid ${isCoexistence ? 'rgba(31,111,235,.3)' : 'rgba(37,211,102,.3)'}`,
+            }}>
+            {isCoexistence ? '📱 Coexistence' : '☁ Cloud API'}
+          </span>
         </span>
         <button onClick={onRefresh} disabled={loading} style={{
           background: 'none', border: '1px solid #30363d', borderRadius: 7, padding: '4px 10px',
@@ -658,12 +697,43 @@ function PhoneStatusPanel({ phones, wabaId, activePhoneId, loading, error, onRef
             <DetailRow label="WABA ID"          value={wabaId} mono />
           </div>
 
-          {/* Pending explanation */}
+          {/* Pending explanation + Register action */}
           {p.status === 'PENDING' && (
             <div style={{ marginTop: 12, background: 'rgba(210,153,34,.06)', border: '1px solid rgba(210,153,34,.15)', borderRadius: 8, padding: '9px 12px' }}>
               <p style={{ margin: 0, fontSize: 11, color: '#d29922', lineHeight: 1.6 }}>
-                <strong>Pending / In review</strong> — Meta is reviewing your account. This usually takes a few hours. You can still send messages to test numbers while waiting.
+                <strong>Pending</strong> — this number isn't registered for the Cloud API yet, so it can't send or receive messages. Click <strong>Register Phone</strong> to complete registration with Meta.
               </p>
+
+              {isActive && (
+                <>
+                  <button onClick={onRegisterPhone} disabled={registeringPhone} style={{
+                    marginTop: 10, background: registeringPhone ? 'rgba(210,153,34,.15)' : '#d29922',
+                    color: registeringPhone ? '#d29922' : '#0d1117', border: 'none', borderRadius: 7,
+                    padding: '7px 14px', fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                    cursor: registeringPhone ? 'not-allowed' : 'pointer',
+                  }}>
+                    {registeringPhone ? 'Registering with Meta…' : '⚡ Register Phone'}
+                  </button>
+
+                  {registerPhoneError && (
+                    <div style={{ marginTop: 10, background: 'rgba(248,81,73,.08)', border: '1px solid rgba(248,81,73,.2)', borderRadius: 8, padding: '10px 12px' }}>
+                      <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#f85149', lineHeight: 1.5 }}>
+                        ⚠ {registerPhoneError.headline}
+                      </p>
+                      {registerPhoneError.hint && (
+                        <p style={{ margin: '5px 0 0', fontSize: 11, color: '#c9827e', lineHeight: 1.6 }}>
+                          {registerPhoneError.hint}
+                        </p>
+                      )}
+                      {registerPhoneError.code != null && (
+                        <p style={{ margin: '7px 0 0', fontSize: 10, color: '#6e7681', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                          Meta error code {registerPhoneError.code}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           {p.status === 'FLAGGED' && (
