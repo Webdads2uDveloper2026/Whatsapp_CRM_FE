@@ -30,9 +30,42 @@ const fmtTime = iso => { const d = parseUTC(iso); return d ? d.toLocaleString('e
 const nowISTLocal = () => new Date().toLocaleString('sv-SE',{timeZone:TZ}).replace(' ','T').slice(0,16)
 const pct     = (n, t) => t > 0 ? Math.round((n/t)*100) : 0
 
+// ── Template header media ─────────────────────────────────────────────────────
+// The stored header file is served behind JWT auth, so it can't go straight into
+// an <img src>. Fetch it as a blob through the authenticated client (same pattern
+// as Inbox) and hand back an object URL. A plain http(s) override URL — one the
+// user typed into the form — is used as-is.
+function useHeaderMedia(mediaPath, overrideUrl) {
+  const [url, setUrl] = useState(null)
+
+  useEffect(() => {
+    const manual = (overrideUrl || '').trim()
+    if (manual) { setUrl(manual); return }
+
+    setUrl(null)
+    if (!mediaPath) return
+
+    let cancelled = false, objectUrl = null
+    api.get(mediaPath, { responseType: 'blob' })
+      .then(({ data }) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(data)
+        setUrl(objectUrl)
+      })
+      .catch(() => { /* no stored copy — fall back to the placeholder */ })
+
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [mediaPath, overrideUrl])
+
+  return url
+}
+
 // ── WhatsApp Preview ──────────────────────────────────────────────────────────
-function WaPreview({ templateName, bodyText, variables = {}, headerType, headerText, footerText, buttons = [] }) {
+function WaPreview({ templateName, bodyText, variables = {}, headerType, headerText, footerText, buttons = [],
+                     headerMediaPath = '', headerMediaUrl = '' }) {
   const body = (bodyText || '').replace(/\{\{(\w+)\}\}/g, (_, k) => variables[k] || `{{${k}}}`)
+  const mediaUrl = useHeaderMedia(headerMediaPath, headerMediaUrl)
+  const isMediaHeader = ['image', 'video', 'document'].includes(headerType)
   return (
     <div className="flex flex-col items-center select-none">
       <div className="w-56 bg-[#111] rounded-[36px] p-2 shadow-xl border-4 border-[#1a1a1a]">
@@ -47,9 +80,19 @@ function WaPreview({ templateName, bodyText, variables = {}, headerType, headerT
             </div>
             <div className="max-w-[90%] bg-white rounded-xl rounded-tl-sm shadow-sm overflow-hidden">
               {headerType && headerType !== 'none' && (
-                <div className={`px-2.5 pt-2 text-[10px] font-bold text-slate-800 ${headerType === 'image' ? 'bg-slate-100 py-4 text-center text-slate-400' : ''}`}>
-                  {headerType === 'image' ? '🖼 Image' : headerText}
-                </div>
+                isMediaHeader ? (
+                  mediaUrl && headerType === 'image' ? (
+                    <img src={mediaUrl} alt="" className="w-full max-h-32 object-cover"/>
+                  ) : mediaUrl && headerType === 'video' ? (
+                    <video src={mediaUrl} className="w-full max-h-32 object-cover" muted/>
+                  ) : (
+                    <div className="bg-slate-100 py-4 text-center text-[10px] font-bold text-slate-400">
+                      {headerType === 'video' ? '🎬 Video' : headerType === 'document' ? '📄 Document' : '🖼 Image'}
+                    </div>
+                  )
+                ) : (
+                  <div className="px-2.5 pt-2 text-[10px] font-bold text-slate-800">{headerText}</div>
+                )
               )}
               <div className="px-2.5 py-2">
                 <p className="text-[10px] text-slate-800 whitespace-pre-wrap leading-relaxed">
@@ -430,7 +473,7 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
 
   const [form, setForm] = useState({
     name:'', audienceMode:'all', audienceTag:'', selectedIds:[],
-    templateId:'', headerType:'none', headerText:'', headerMedia:'',
+    templateId:'', headerType:'none', headerText:'', headerMedia:'', headerMediaPath:'',
     bodyText:'', footerText:'', variables:{}, buttons:[],
     scheduleType:'now', scheduleTime:'',
   })
@@ -445,7 +488,11 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
     const btns   = (t.components?.find(c=>c.type==='BUTTONS')?.buttons||[]).map(b=>({type:(b.type||'reply').toLowerCase(),label:b.text||''}))
     setForm(p=>({...p, templateId:t.id, bodyText:body, footerText:footer,
       headerType:hdr?(hdr.format||'none').toLowerCase():'none',
-      headerText:hdr?.format==='TEXT'?(hdr.text||''):'', buttons:btns }))
+      headerText:hdr?.format==='TEXT'?(hdr.text||''):'',
+      // Path to the header image stored when the template was created — the
+      // preview renders this, and the backend sends it when no URL is supplied.
+      headerMediaPath: t.header_media_url || '',
+      headerMedia:'', buttons:btns }))
   }
 
   const bodyVars = [...new Set((form.bodyText.match(/\{\{(\w+)\}\}/g)||[]).map(m=>m.replace(/[{}]/g,'')))]
@@ -668,7 +715,8 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
 
               <div className="flex justify-center">
                 <WaPreview templateName={tpl?.name} bodyText={form.bodyText} variables={form.variables}
-                  headerType={form.headerType} headerText={form.headerText} footerText={form.footerText} buttons={form.buttons}/>
+                  headerType={form.headerType} headerText={form.headerText} footerText={form.footerText} buttons={form.buttons}
+                  headerMediaPath={form.headerMediaPath} headerMediaUrl={form.headerMedia}/>
               </div>
             </div>
           )}
@@ -694,7 +742,8 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
               </div>
               <div className="flex justify-center">
                 <WaPreview templateName={tpl?.name} bodyText={form.bodyText} variables={form.variables}
-                  headerType={form.headerType} headerText={form.headerText} footerText={form.footerText} buttons={form.buttons}/>
+                  headerType={form.headerType} headerText={form.headerText} footerText={form.footerText} buttons={form.buttons}
+                  headerMediaPath={form.headerMediaPath} headerMediaUrl={form.headerMedia}/>
               </div>
             </div>
           )}
