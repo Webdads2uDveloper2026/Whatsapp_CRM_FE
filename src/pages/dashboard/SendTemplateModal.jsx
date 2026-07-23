@@ -22,18 +22,15 @@ import { useState, useEffect, useMemo } from 'react'
 import api from '../../services/api'
 
 /**
- * The approved media URL stored on a template's HEADER component.
- * Meta returns it under example.header_handle (array) or example.header_url.
- * This is the image/video/document that goes out with every send — it is
- * fixed by the template and not customised per-message (same as WATI).
+ * Media-header templates need real media attached on EVERY send — Meta approves
+ * the header's shape, not its content. The `example.header_handle` URL on an
+ * approved template is a signed, expiring preview asset that only an
+ * authenticated session can load, so it is useless both here and at send time
+ * (Meta's fetcher gets 403 → message fails with error 131053).
+ *
+ * The media the recipient actually receives is the copy the backend keeps for
+ * the template; `has_header_media` reports whether that copy exists.
  */
-function templateHeaderMedia(headerComp) {
-  const ex = headerComp?.example
-  if (!ex) return ''
-  const pick = v => (Array.isArray(v) ? v[0] : v)
-  const url  = pick(ex.header_handle) || pick(ex.header_url) || ''
-  return typeof url === 'string' && url.startsWith('http') ? url : ''
-}
 
 export default function SendTemplateModal({ onClose, onSend }) {
   const [templates,  setTemplates]  = useState([])
@@ -45,6 +42,8 @@ export default function SendTemplateModal({ onClose, onSend }) {
   // Runtime values the user fills in
   const [variables,  setVariables]  = useState({})   // { "first_name": "", "1": "" }
   const [search,     setSearch]     = useState('')
+  const [uploading,  setUploading]  = useState(false)
+  const [localPrev,  setLocalPrev]  = useState('')   // object URL of a just-uploaded file
 
   useEffect(() => {
     api.get('/templates/local')
@@ -68,16 +67,38 @@ export default function SendTemplateModal({ onClose, onSend }) {
   const hasText    = headerFmt === 'text'
   const hasVars    = bodyVars.length > 0
 
-  // The template's OWN approved header media — the recipient always gets this
-  // image/video/document; it is NOT customised at send time (matches WATI).
-  const headerMediaUrl = useMemo(() => templateHeaderMedia(headerComp), [headerComp])
+  // Whether the backend holds a sendable copy of this template's header media.
+  const hasStoredMedia = !!selected?.has_header_media
 
-  const canSend    = selected && (!hasVars || bodyVars.every(v => variables[v]?.trim()))
+  // Not gated on stored media: when none is stored the backend first tries to
+  // adopt the template's approved asset, and only fails the send with a clear
+  // error if that doesn't work. Blocking here would stop sends that succeed.
+  const canSend = selected && (!hasVars || bodyVars.every(v => variables[v]?.trim()))
 
   const handleSelect = tpl => {
     setSelected(tpl)
     setVariables({})
     setError('')
+    setLocalPrev('')
+  }
+
+  const handleHeaderUpload = async file => {
+    if (!file || !selected) return
+    setUploading(true); setError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      await api.post(`/templates/${selected.name}/header-media`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setLocalPrev(URL.createObjectURL(file))
+      const updated = { ...selected, has_header_media: true }
+      setSelected(updated)
+      setTemplates(ts => ts.map(t => (t.id === updated.id ? updated : t)))
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message || 'Upload failed')
+    }
+    setUploading(false)
   }
 
   const handleSend = async () => {
@@ -94,9 +115,11 @@ export default function SendTemplateModal({ onClose, onSend }) {
         template_name:   selected.name,
         language:        selected.language || 'en_US',
         header_type:     headerFmt,
-        // Media header: always reuse the template's own approved media (no customisation)
+        // Media header: leave both blank — the backend attaches its stored copy
+        // of the header media. Never pass example.header_handle here; Meta
+        // cannot fetch it and the message fails asynchronously with 131053.
         header_media_id: '',
-        header_link:     hasMedia ? headerMediaUrl : '',
+        header_link:     '',
         body_variables:  hasVars ? orderedVars : {},
         buttons:         [],
       }
@@ -143,10 +166,10 @@ export default function SendTemplateModal({ onClose, onSend }) {
                   <div className="px-2.5 pt-2 pb-0.5 text-[10px] font-bold text-slate-800">{headerComp.text}</div>
                 )}
                 {hasMedia && (
-                  headerMediaUrl && headerFmt === 'image' ? (
-                    <img src={headerMediaUrl} alt="header" className="w-full h-16 object-cover"/>
-                  ) : headerMediaUrl && headerFmt === 'video' ? (
-                    <video src={headerMediaUrl} muted playsInline className="w-full h-16 object-cover bg-black"/>
+                  localPrev && headerFmt === 'image' ? (
+                    <img src={localPrev} alt="header" className="w-full h-16 object-cover"/>
+                  ) : localPrev && headerFmt === 'video' ? (
+                    <video src={localPrev} muted playsInline className="w-full h-16 object-cover bg-black"/>
                   ) : (
                     <div className="w-full h-16 bg-slate-200 flex items-center justify-center">
                       <span className="text-xl opacity-50">
@@ -282,24 +305,48 @@ export default function SendTemplateModal({ onClose, onSend }) {
                       <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">
                         {headerFmt.charAt(0).toUpperCase() + headerFmt.slice(1)} header
                       </label>
-                      {headerMediaUrl ? (
-                        <div className="border border-slate-200 rounded-xl overflow-hidden">
-                          {headerFmt === 'image' ? (
-                            <img src={headerMediaUrl} alt="template header" className="w-full max-h-44 object-contain bg-slate-50"/>
-                          ) : headerFmt === 'video' ? (
-                            <video src={headerMediaUrl} controls className="w-full max-h-44 bg-black"/>
-                          ) : (
-                            <a href={headerMediaUrl} target="_blank" rel="noreferrer"
-                              className="flex items-center gap-2 px-4 py-3 text-sm text-blue-600">📄 View document</a>
+                      {hasStoredMedia ? (
+                        <div className="border border-emerald-200 bg-emerald-50 rounded-xl overflow-hidden">
+                          {localPrev && headerFmt === 'image' && (
+                            <img src={localPrev} alt="template header" className="w-full max-h-44 object-contain bg-slate-50"/>
                           )}
-                          <p className="text-[10px] text-slate-400 px-3 py-2 border-t border-slate-100">
-                            Uses the template's approved {headerFmt} — sent automatically, no customisation.
+                          {localPrev && headerFmt === 'video' && (
+                            <video src={localPrev} controls className="w-full max-h-44 bg-black"/>
+                          )}
+                          <p className="text-[11px] text-emerald-700 px-3 py-2">
+                            ✅ {headerFmt.charAt(0).toUpperCase() + headerFmt.slice(1)} stored — attached automatically on every send.
                           </p>
+                          <label className="block px-3 pb-2 text-[10px] text-emerald-600 underline cursor-pointer">
+                            Replace {headerFmt}
+                            <input
+                              type="file"
+                              className="hidden"
+                              disabled={uploading}
+                              accept={headerFmt === 'image' ? 'image/*' : headerFmt === 'video' ? 'video/*' : undefined}
+                              onChange={e => handleHeaderUpload(e.target.files?.[0])}
+                            />
+                          </label>
                         </div>
                       ) : (
-                        <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                          This template's {headerFmt} isn't stored locally — run <b>Sync</b> in Templates to fetch it.
-                        </p>
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                          <p className="text-[11px] text-amber-700">
+                            No {headerFmt} stored yet. WhatsApp requires the {headerFmt} to be attached on every
+                            send — on first send we'll try to adopt the template's approved {headerFmt}
+                            automatically. Upload one here if that fails, or to use a different {headerFmt}.
+                            Either way the template is unchanged and needs no re-approval.
+                          </p>
+                          <label className={'inline-block mt-2 px-3 py-1.5 text-[11px] font-semibold rounded-lg cursor-pointer ' +
+                            (uploading ? 'bg-slate-200 text-slate-400' : 'bg-amber-600 text-white hover:bg-amber-700')}>
+                            {uploading ? 'Uploading…' : `Upload ${headerFmt}`}
+                            <input
+                              type="file"
+                              className="hidden"
+                              disabled={uploading}
+                              accept={headerFmt === 'image' ? 'image/*' : headerFmt === 'video' ? 'video/*' : undefined}
+                              onChange={e => handleHeaderUpload(e.target.files?.[0])}
+                            />
+                          </label>
+                        </div>
                       )}
                     </div>
                   )}
@@ -354,7 +401,9 @@ export default function SendTemplateModal({ onClose, onSend }) {
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/60">
           <p className="text-xs text-slate-400">
-            {selected ? (hasVars ? `${bodyVars.filter(v => variables[v]?.trim()).length}/${bodyVars.length} variables filled` : 'Ready to send') : 'Choose a template'}
+            {!selected ? 'Choose a template'
+              : hasVars ? `${bodyVars.filter(v => variables[v]?.trim()).length}/${bodyVars.length} variables filled`
+              :           'Ready to send'}
           </p>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-5 py-2.5 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-100">
