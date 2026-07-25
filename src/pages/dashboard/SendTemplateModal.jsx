@@ -20,6 +20,7 @@
  */
 import { useState, useEffect, useMemo } from 'react'
 import api from '../../services/api'
+import TemplateText, { extractVars } from '../../components/TemplateText'
 
 /**
  * Media-header templates need real media attached on EVERY send — Meta approves
@@ -57,7 +58,7 @@ export default function SendTemplateModal({ onClose, onSend }) {
     if (!selected) return []
     const body = selected.components?.find(c => c.type === 'BODY')
     if (!body?.text) return []
-    const matches = [...new Set((body.text.match(/\{\{(\w+)\}\}/g) || []).map(m => m.replace(/[{}]/g, '')))]
+    const matches = extractVars(body.text)
     return matches
   }, [selected])
 
@@ -143,9 +144,6 @@ export default function SendTemplateModal({ onClose, onSend }) {
     const buttons = selected.components?.find(c => c.type === 'BUTTONS')
     const btns = buttons?.buttons || []
 
-    const previewText = (body?.text || '').replace(/\{\{(\w+)\}\}/g, (_, k) =>
-      variables[k] || '[' + k + ']'
-    )
 
     return (
       <div className="flex flex-col items-center gap-2 select-none">
@@ -181,7 +179,9 @@ export default function SendTemplateModal({ onClose, onSend }) {
                 {/* Body */}
                 <div className="px-2.5 py-2">
                   <p className="text-[10px] text-slate-800 whitespace-pre-wrap leading-relaxed min-h-[14px]">
-                    {previewText || <span className="text-slate-300 italic text-[9px]">Body text…</span>}
+                    {body?.text
+                      ? <TemplateText text={body.text} variables={variables}/>
+                      : <span className="text-slate-300 italic text-[9px]">Body text…</span>}
                   </p>
                 </div>
                 {/* Footer */}
@@ -228,7 +228,7 @@ export default function SendTemplateModal({ onClose, onSend }) {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search templates…"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-400"
               />
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -246,7 +246,7 @@ export default function SendTemplateModal({ onClose, onSend }) {
               )}
               {!loading && filtered.map(t => {
                 const body = t.components?.find(c => c.type === 'BODY')
-                const vars = (body?.text?.match(/\{\{(\w+)\}\}/g) || []).length
+                const vars = extractVars(body?.text).length   // distinct placeholders
                 const hdr  = t.components?.find(c => c.type === 'HEADER')
                 const hfmt = hdr?.format || ''
                 return (
@@ -360,14 +360,18 @@ export default function SendTemplateModal({ onClose, onSend }) {
                       <div className="space-y-2">
                         {bodyVars.map(v => (
                           <div key={v} className="flex items-center gap-3">
-                            <code className="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-mono shrink-0 min-w-[70px] text-center">
+                            <code className={`text-[11px] border px-2.5 py-1.5 rounded-lg font-mono shrink-0 min-w-[70px] text-center transition-colors ${
+                              (variables[v] || '').trim()
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-dashed border-amber-300'
+                            }`}>
                               {'{{'}{v}{'}}'}
                             </code>
                             <input
                               value={variables[v] || ''}
                               onChange={e => setVariables(p => ({ ...p, [v]: e.target.value }))}
                               placeholder={`Value for ${v}`}
-                              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 placeholder-slate-400"
+                              className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm text-slate-800 font-medium placeholder-slate-400 placeholder:font-normal outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50"
                             />
                           </div>
                         ))}

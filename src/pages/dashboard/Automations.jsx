@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react'
 import api from '../../services/api'
+import { extractVars } from '../../components/TemplateText'
 
 const TRIGGER_TYPES = [
   { value: 'any',           label: 'Any message',      desc: 'Fires on every inbound message' },
@@ -124,7 +125,7 @@ export default function Automations() {
     const tpl  = templates.find(t => t.name === tplName)
     const body = tpl?.components?.find(c => c.type === 'BODY')
     if (!body?.text) return []
-    return [...new Set((body.text.match(/\{\{(\w+)\}\}/g) || []).map(m => m.replace(/[{}]/g, '')))]
+    return extractVars(body.text)
   }
 
   const tplVars = form.action.type === 'template' ? templateVars(form.action.template_name) : []

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import api from '../../services/api'
+import TemplateText, { extractVars } from '../../components/TemplateText'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants & config
@@ -610,10 +611,6 @@ function CatBadge({ category }) {
 function WaPhone({ form = {} }) {
   const bodyRaw = form.body_text || ''
   const vars    = form.variables || {}
-  // Replace {{name}} or {{1}} with sample values
-  const body = bodyRaw.replace(/\{\{(\w+)\}\}/g, (_, k) =>
-    vars[k] || `[${k}]`
-  )
   const hasHeader = form.header_type && form.header_type !== 'none'
   const buttons   = form.buttons || []
 
@@ -689,7 +686,9 @@ function WaPhone({ form = {} }) {
                 {/* Body */}
                 <div className="px-3 py-2">
                   <p className="text-[11px] text-slate-800 whitespace-pre-wrap leading-relaxed min-h-[18px]">
-                    {body || <span className="text-slate-300 italic">Your message will appear here…</span>}
+                    {bodyRaw
+                      ? <TemplateText text={bodyRaw} variables={vars}/>
+                      : <span className="text-slate-300 italic">Your message will appear here…</span>}
                   </p>
                 </div>
 
@@ -965,10 +964,7 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
   })
 
   // Extract variable placeholders from body
-  const bodyVars = useMemo(() => {
-    const matches = form.body_text.match(/\{\{(\w+)\}\}/g) || []
-    return [...new Set(matches.map(m => m.replace(/[{}]/g,'')))]
-  }, [form.body_text])
+  const bodyVars = useMemo(() => extractVars(form.body_text), [form.body_text])
 
   const canNext = [
     form.name.trim().length >= 2 && /^[a-z0-9_]+$/.test(form.name),
@@ -1288,11 +1284,15 @@ function CreateWizard({ onClose, onCreated, prefill = null }) {
                       <div className="space-y-2">
                         {bodyVars.map(v => (
                           <div key={v} className="flex items-center gap-2">
-                            <code className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-mono shrink-0">{`{{${v}}}`}</code>
+                            <code className={`text-[10px] px-2 py-0.5 rounded font-mono shrink-0 border transition-colors ${
+                              (form.variables[v]||'').trim()
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-dashed border-amber-300'
+                            }`}>{`{{${v}}}`}</code>
                             <input value={form.variables[v]||''}
                               onChange={e => setForm(p=>({...p,variables:{...p.variables,[v]:e.target.value}}))}
                               placeholder={`Example value for ${v}`}
-                              className="flex-1 bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400 transition-colors"/>
+                              className="flex-1 bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-medium placeholder-slate-400 placeholder:font-normal outline-none focus:border-blue-400 transition-colors"/>
                           </div>
                         ))}
                       </div>
@@ -1606,10 +1606,12 @@ function LibraryTab({ onUse }) {
 
                   {/* Body preview */}
                   <p className="text-[11px] text-slate-500 line-clamp-3 leading-relaxed">
-                    {tpl.form.body_text
-                      .replace(/\*([^*]+)\*/g, '$1')
-                      .replace(/\{\{(\w+)\}\}/g, (_, k) => tpl.form.variables?.[k] || `[${k}]`)
-                    }
+                    <TemplateText
+                      text={tpl.form.body_text}
+                      variables={tpl.form.variables}
+                      markdown={false}
+                      highlight={false}
+                    />
                   </p>
                 </div>
 
@@ -1831,7 +1833,7 @@ export default function Templates() {
             {/* Mobile search */}
             <div className="md:hidden px-4 pt-4 pb-3 border-b border-slate-100">
               <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 text-sm outline-none focus:border-blue-400"/>
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-blue-400"/>
             </div>
 
             <table className="w-full">

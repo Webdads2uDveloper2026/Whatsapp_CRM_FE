@@ -8,6 +8,32 @@ import { Mp3Encoder } from "@breezystack/lamejs";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 
+// WhatsApp registration status pill — evidence-based (see backend wa_status).
+const WA_LABELS = {
+  active:     { t: "On WhatsApp",     c: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", d: "bg-emerald-400" },
+  not_active: { t: "Not on WhatsApp", c: "text-red-400 bg-red-500/10 border-red-500/30",             d: "bg-red-500" },
+  unknown:    { t: "Unknown",         c: "text-slate-400 bg-slate-700/40 border-slate-600",           d: "bg-slate-500" },
+};
+
+function WaBadge({ status, className = "" }) {
+  const s = WA_LABELS[status] || WA_LABELS.unknown;
+  return (
+    <span
+      title={
+        status === "active"
+          ? "This number is on WhatsApp"
+          : status === "not_active"
+            ? "This number is not registered on WhatsApp"
+            : "WhatsApp status not confirmed yet"
+      }
+      className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${s.c} ${className}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${s.d}`} />
+      {s.t}
+    </span>
+  );
+}
+
 const TZ = "Asia/Kolkata";
 
 const parseUTC = (iso) => {
@@ -602,6 +628,10 @@ export default function Inbox() {
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
   const [convos, setConvos] = useState([]);
+  const [convoTotal, setConvoTotal] = useState(0);
+  const [convoPage, setConvoPage] = useState(1);
+  const [loadingConvos, setLoadingConvos] = useState(false);
+  const convoListRef = useRef(null);
   const [selected, setSelected] = useState(null);
   const [contact, setContact] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -640,18 +670,53 @@ export default function Inbox() {
   const recordStreamRef = useRef(null);
   const recordTimerRef = useRef(null);
 
-  const loadConvos = useCallback(() => {
-    const p = new URLSearchParams({ status: statusFilter, limit: 60 });
-    if (search) p.append("search", search);
-    api
-      .get(`/conversations?${p}`)
-      .then((r) => setConvos(r.data.conversations || []))
-      .catch(() => {});
-  }, [statusFilter, search]);
+  const CONVO_PAGE_SIZE = 30;
 
+  // Load a page of conversations. page 1 replaces the list; higher pages append,
+  // which is what powers the infinite scroll below.
+  const loadConvos = useCallback(
+    async (pg = 1) => {
+      setLoadingConvos(true);
+      try {
+        const p = new URLSearchParams({
+          status: statusFilter,
+          page: pg,
+          limit: CONVO_PAGE_SIZE,
+        });
+        if (search) p.append("search", search);
+        const { data } = await api.get(`/conversations?${p}`);
+        const rows = data.conversations || [];
+        setConvoTotal(data.total || 0);
+        setConvoPage(pg);
+        setConvos((prev) => {
+          if (pg === 1) return rows;
+          // De-dupe in case a new inbound message reordered pages between fetches
+          const seen = new Set(prev.map((c) => c.id));
+          return [...prev, ...rows.filter((c) => !seen.has(c.id))];
+        });
+      } catch {}
+      setLoadingConvos(false);
+    },
+    [statusFilter, search],
+  );
+
+  // Reload from page 1 whenever the filter or search changes
   useEffect(() => {
-    loadConvos();
+    loadConvos(1);
   }, [loadConvos]);
+
+  // Infinite scroll: fetch the next page as the list nears the bottom
+  const onConvoScroll = useCallback(
+    (e) => {
+      const el = e.currentTarget;
+      if (loadingConvos) return;
+      if (convos.length >= convoTotal) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+        loadConvos(convoPage + 1);
+      }
+    },
+    [loadingConvos, convos.length, convoTotal, convoPage, loadConvos],
+  );
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -691,19 +756,44 @@ export default function Inbox() {
     } catch {}
   }, []);
 
+  // Load the contact behind a conversation by phone number, when we don't have a
+  // usable contact_id. Used as a fallback so the detail panel never shows a
+  // different (or blank) record than the name in the list.
+  const loadContactByWaId = useCallback(async (wa_id) => {
+    try {
+      const { data } = await api.get(
+        `/contacts?search=${encodeURIComponent(wa_id)}&limit=5`,
+      );
+      const found = (data.contacts || []).find((c) => c.wa_id === wa_id);
+      if (found) {
+        setContact(found);
+        setEditForm(found);
+      }
+    } catch {}
+  }, []);
+
   const selectConvo = useCallback(
     async (c) => {
       setSelected(c);
       setPage(1);
       setShowTemplates(false);
+      // Seed the panel from the conversation immediately so the name and WhatsApp
+      // status render at once — the fetch below only refines it.
+      setContact({
+        id: c.contact_id || "",
+        wa_id: c.wa_id,
+        profile_name: c.profile_name && c.profile_name !== c.wa_id ? c.profile_name : "",
+        wa_status: c.wa_status || "unknown",
+      });
       await loadMessages(c.id, 1);
       if (c.contact_id) await loadContact(c.contact_id);
+      else await loadContactByWaId(c.wa_id);
       setConvos((p) =>
         p.map((x) => (x.id === c.id ? { ...x, unread_count: 0 } : x)),
       );
       setTimeout(() => inputRef.current?.focus(), 100);
     },
-    [loadMessages, loadContact],
+    [loadMessages, loadContact, loadContactByWaId],
   );
 
   useEffect(() => {
@@ -1538,8 +1628,12 @@ export default function Inbox() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {convos.length === 0 && (
+        <div
+          ref={convoListRef}
+          onScroll={onConvoScroll}
+          className="flex-1 overflow-y-auto"
+        >
+          {convos.length === 0 && !loadingConvos && (
             <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-500">
               <span className="text-3xl opacity-30">💬</span>
               <p className="text-sm">No conversations</p>
@@ -1558,18 +1652,25 @@ export default function Inbox() {
               className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-slate-800/60 transition-colors
                 ${selected?.id === c.id ? "bg-slate-800 border-l-2 border-l-blue-500 pl-3.5" : "hover:bg-slate-800/40"}`}
             >
-              <Avatar name={c.wa_id} />
+              <Avatar name={c.profile_name || c.wa_id} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
                   <span
-                    className={`text-sm font-mono truncate ${c.unread_count ? "font-semibold text-white" : "text-slate-300"}`}
+                    className={`text-sm truncate ${c.unread_count ? "font-semibold text-white" : "text-slate-200"}`}
                   >
-                    +{c.wa_id}
+                    {c.profile_name && c.profile_name !== c.wa_id
+                      ? c.profile_name
+                      : `+${c.wa_id}`}
                   </span>
                   <span className="text-[10px] text-slate-500 shrink-0 ml-2">
                     {fmt(c.last_message_at)}
                   </span>
                 </div>
+                {c.profile_name && c.profile_name !== c.wa_id && (
+                  <div className="text-[11px] text-slate-500 font-mono truncate -mt-0.5 mb-0.5">
+                    +{c.wa_id}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span
                     className={`text-xs truncate ${c.unread_count ? "text-slate-300" : "text-slate-500"}`}
@@ -1585,6 +1686,16 @@ export default function Inbox() {
               </div>
             </div>
           ))}
+          {loadingConvos && (
+            <div className="py-3 text-center text-[11px] text-slate-500">
+              Loading…
+            </div>
+          )}
+          {!loadingConvos && convos.length > 0 && convos.length >= convoTotal && (
+            <div className="py-3 text-center text-[10px] text-slate-600">
+              {convoTotal} conversation{convoTotal === 1 ? "" : "s"}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -1609,16 +1720,20 @@ export default function Inbox() {
         ) : (
           <>
             <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950/80 backdrop-blur shrink-0">
-              <Avatar name={contact?.profile_name || selected.wa_id} />
+              <Avatar name={contact?.profile_name || selected.profile_name || selected.wa_id} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold truncate">
-                  {contact?.profile_name || (
-                    <span className="text-slate-400 font-normal">Unknown</span>
-                  )}
+                  {contact?.profile_name ||
+                    (selected.profile_name && selected.profile_name !== selected.wa_id
+                      ? selected.profile_name
+                      : <span className="text-slate-400 font-normal">No name</span>)}
                 </p>
-                <p className="text-xs text-slate-400 font-mono">
-                  +{selected.wa_id}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-slate-400 font-mono truncate">
+                    +{selected.wa_id}
+                  </p>
+                  <WaBadge status={contact?.wa_status || selected.wa_status} />
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {selected.window_expires_at && (
@@ -1993,6 +2108,7 @@ export default function Inbox() {
             <p className="text-xs text-slate-400 font-mono">
               +{selected.wa_id}
             </p>
+            <WaBadge status={contact?.wa_status || selected.wa_status} className="mt-1" />
             {contact && (
               <button
                 onClick={() => navigate("/dashboard/contacts")}

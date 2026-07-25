@@ -68,6 +68,32 @@ function Badge({ status }) {
   );
 }
 
+// WhatsApp registration status — evidence-based (see backend wa_status service).
+const WA_STATUS = {
+  active:     { label: "On WhatsApp",       cls: "bg-emerald-500/10 border-emerald-500/30 text-emerald-400", dot: "bg-emerald-400" },
+  not_active: { label: "WhatsApp Not Active", cls: "bg-red-500/10 border-red-500/30 text-red-400",           dot: "bg-red-500" },
+  unknown:    { label: "Unknown",            cls: "bg-slate-700/40 border-slate-600 text-slate-400",         dot: "bg-slate-500" },
+};
+
+function WaStatus({ status, profileName, showName = false }) {
+  const s = WA_STATUS[status] || WA_STATUS.unknown;
+  return (
+    <span
+      title={
+        status === "active"
+          ? `On WhatsApp${profileName ? ` — ${profileName}` : ""}`
+          : status === "not_active"
+            ? "This number is not registered on WhatsApp"
+            : "WhatsApp status not known yet — confirmed once they message you or you message them"
+      }
+      className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${s.cls}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {showName && status === "active" && profileName ? profileName : s.label}
+    </span>
+  );
+}
+
 function Tag({ label, onRemove }) {
   return (
     <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">
@@ -427,7 +453,14 @@ function ContactDrawer({ contact, agents, onUpdate, onClose, onOpenChat }) {
               <p className="text-xs text-slate-400 font-mono mt-0.5">
                 +{contact.wa_id}
               </p>
-              <Badge status={contact.status} />
+              <div className="flex items-center gap-2 mt-1">
+                <Badge status={contact.status} />
+                <WaStatus
+                  status={contact.wa_status}
+                  profileName={contact.profile_name}
+                  showName
+                />
+              </div>
             </div>
           </div>
 
@@ -526,90 +559,58 @@ function ContactDrawer({ contact, agents, onUpdate, onClose, onOpenChat }) {
   );
 }
 
-// ── CSV Import Modal ──────────────────────────────────────────────────────────
+// ── Import Contacts Modal (file upload + manual numbers) ──────────────────────
+// Supports .xlsx and .csv uploads (parsed server-side) and pasting raw phone
+// numbers with no other details. Tags and WhatsApp opt-in are optional in both.
 function CSVModal({ onClose, onDone }) {
-  const [step, setStep] = useState("upload");
-  const [csv, setCsv] = useState(null);
-  const [mapping, setMapping] = useState({});
-  const [preview, setPreview] = useState([]);
+  const [tab, setTab] = useState("file"); // file | manual
+  const [file, setFile] = useState(null);
+  const [numbers, setNumbers] = useState("");
+  const [tags, setTags] = useState("");
+  const [optedIn, setOptedIn] = useState(false);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const fileRef = useRef();
 
-  const FIELDS = [
-    { key: "wa_id", label: "Phone *" },
-    { key: "profile_name", label: "Name" },
-    { key: "email", label: "Email" },
-    { key: "tags", label: "Tags" },
-    { key: "status", label: "Status" },
-  ];
+  const tagList = () =>
+    tags.split(/[,;]/).map((t) => t.trim()).filter(Boolean);
 
-  const parseCSV = (text) => {
-    const lines = text
-      .trim()
-      .split("\n")
-      .filter((l) => l.trim());
-    const headers = lines[0]
-      .split(",")
-      .map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-    const rows = lines.slice(1).map((l) => {
-      const vals = l.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-      return Object.fromEntries(headers.map((h, i) => [h, vals[i] || ""]));
-    });
-    return { headers, rows };
-  };
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
+  const importFile = async () => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const data = parseCSV(ev.target.result);
-      setCsv(data);
-      const auto = {};
-      FIELDS.forEach((f) => {
-        const m = data.headers.find(
-          (h) =>
-            h === f.key ||
-            (f.key === "wa_id" &&
-              (h.includes("phone") || h.includes("mobile"))) ||
-            (f.key === "profile_name" && h.includes("name")),
-        );
-        if (m) auto[f.key] = m;
-      });
-      setMapping(auto);
-      setStep("map");
-    };
-    reader.readAsText(file);
-  };
-
-  const runImport = async () => {
     setLoading(true);
-    const contacts = csv.rows
-      .map((r) => ({
-        wa_id: (r[mapping.wa_id] || "").replace(/[\s+\-()]/g, ""),
-        profile_name: r[mapping.profile_name] || "",
-        email: r[mapping.email] || "",
-        tags: r[mapping.tags]
-          ? r[mapping.tags]
-              .split(";")
-              .map((t) => t.trim())
-              .filter(Boolean)
-          : [],
-        status: r[mapping.status] || "New",
-      }))
-      .filter((c) => c.wa_id && /^\d{7,15}$/.test(c.wa_id));
     try {
-      const { data } = await api.post("/contacts/bulk", { contacts });
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post("/contacts/import-file", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       setResult(data);
-      setStep("result");
       onDone();
     } catch (e) {
       setResult({ error: e.response?.data?.detail || "Import failed" });
-      setStep("result");
     }
     setLoading(false);
   };
+
+  const importManual = async () => {
+    const nums = numbers.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean);
+    if (!nums.length) return;
+    setLoading(true);
+    try {
+      const { data } = await api.post("/contacts/raw", {
+        numbers: nums,
+        tags: tagList(),
+        opted_in: optedIn,
+      });
+      setResult(data);
+      onDone();
+    } catch (e) {
+      setResult({ error: e.response?.data?.detail || "Import failed" });
+    }
+    setLoading(false);
+  };
+
+  const manualCount = numbers.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean).length;
 
   return (
     <div
@@ -621,7 +622,7 @@ function CSVModal({ onClose, onDone }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-5 border-b border-slate-800">
-          <h2 className="text-sm font-semibold">Import contacts from CSV</h2>
+          <h2 className="text-sm font-semibold">Import contacts</h2>
           <button
             onClick={onClose}
             className="text-slate-500 hover:text-slate-200 transition-colors text-xl leading-none"
@@ -630,193 +631,15 @@ function CSVModal({ onClose, onDone }) {
           </button>
         </div>
 
-        {/* Steps indicator */}
-        <div className="flex px-5 pt-4 gap-1">
-          {["upload", "map", "preview", "result"].map((s, i) => (
-            <div
-              key={s}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                ["upload", "map", "preview", "result"].indexOf(step) >= i
-                  ? "bg-blue-500"
-                  : "bg-slate-700"
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Upload */}
-        {step === "upload" && (
-          <div className="p-6">
-            <div
-              onClick={() => fileRef.current.click()}
-              className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-10 flex flex-col items-center gap-3 cursor-pointer transition-colors group"
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={handleFile}
-              />
-              <div className="text-4xl">📂</div>
-              <p className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">
-                Click to upload CSV
-              </p>
-              <p className="text-xs text-slate-500 text-center leading-relaxed">
-                Must have a phone column with country code (no +).
-                <br />
-                Tags: semicolon-separated.
-              </p>
-              <button
-                type="button"
-                className="mt-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-xl transition-colors"
-              >
-                Choose file
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Map */}
-        {step === "map" && csv && (
-          <div className="p-6 space-y-4">
-            <p className="text-sm text-slate-400">
-              Found{" "}
-              <span className="font-semibold text-white">
-                {csv.rows.length}
-              </span>{" "}
-              rows. Map columns:
-            </p>
-            <div className="space-y-3">
-              {FIELDS.map((f) => (
-                <div key={f.key} className="flex items-center gap-4">
-                  <span className="text-xs text-slate-400 w-28 shrink-0">
-                    {f.label}
-                  </span>
-                  <select
-                    value={mapping[f.key] || ""}
-                    onChange={(e) =>
-                      setMapping((p) => ({ ...p, [f.key]: e.target.value }))
-                    }
-                    className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-xl px-3 py-2 outline-none appearance-none cursor-pointer focus:border-blue-500 transition-colors"
-                  >
-                    <option value="">— skip —</option>
-                    {csv.headers.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => setStep("upload")}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 border border-slate-700 rounded-xl transition-colors"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => {
-                  setPreview(
-                    csv.rows.slice(0, 5).map((r) => ({
-                      wa_id: (r[mapping.wa_id] || "").replace(/[\s+\-()]/g, ""),
-                      profile_name: r[mapping.profile_name] || "",
-                      email: r[mapping.email] || "",
-                      tags: r[mapping.tags]
-                        ? r[mapping.tags].split(";").map((t) => t.trim())
-                        : [],
-                      status: r[mapping.status] || "New",
-                    })),
-                  );
-                  setStep("preview");
-                }}
-                disabled={!mapping.wa_id}
-                className="px-4 py-2 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
-              >
-                Preview →
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Preview */}
-        {step === "preview" && (
-          <div className="p-6 space-y-4">
-            <p className="text-sm text-slate-400">Preview of first 5 rows:</p>
-            <div className="overflow-x-auto border border-slate-800 rounded-xl">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-800/60">
-                  <tr>
-                    {["Phone", "Name", "Tags", "Status"].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3 py-2.5 text-left text-slate-400 font-semibold"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((r, i) => (
-                    <tr key={i} className="border-t border-slate-800/60">
-                      <td className="px-3 py-2 font-mono text-slate-300">
-                        {r.wa_id || (
-                          <span className="text-red-400">missing</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-slate-300">
-                        {r.profile_name || "—"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {r.tags.map((t) => (
-                            <Tag key={t} label={t} />
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge status={r.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-slate-500">
-              Will import all {csv.rows.length} rows (invalid phones skipped).
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setStep("map")}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 border border-slate-700 rounded-xl transition-colors"
-              >
-                Back
-              </button>
-              <button
-                onClick={runImport}
-                disabled={loading}
-                className="px-4 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
-              >
-                {loading ? "Importing…" : `Import ${csv.rows.length} contacts`}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Result */}
-        {step === "result" && result && (
+        {/* Result screen */}
+        {result ? (
           <div className="p-8 flex flex-col items-center gap-4 text-center">
             {result.error ? (
               <>
                 <div className="w-14 h-14 rounded-full bg-red-900/20 border border-red-800/40 flex items-center justify-center text-2xl">
                   ✗
                 </div>
-                <h3 className="text-sm font-semibold text-red-400">
-                  Import failed
-                </h3>
+                <h3 className="text-sm font-semibold text-red-400">Import failed</h3>
                 <p className="text-xs text-slate-500">{result.error}</p>
               </>
             ) : (
@@ -825,10 +648,11 @@ function CSVModal({ onClose, onDone }) {
                   ✓
                 </div>
                 <h3 className="text-sm font-semibold">Import complete</h3>
-                <div className="flex gap-8 mt-2">
+                <div className="flex gap-6 mt-2">
                   {[
                     ["Created", result.created, "text-emerald-400"],
                     ["Skipped", result.skipped, "text-slate-400"],
+                    ["Invalid", result.invalid ?? 0, "text-amber-400"],
                     ["Total", result.total, "text-white"],
                   ].map(([l, v, c]) => (
                     <div key={l} className="flex flex-col items-center gap-1">
@@ -839,6 +663,10 @@ function CSVModal({ onClose, onDone }) {
                     </div>
                   ))}
                 </div>
+                <p className="text-[11px] text-slate-500 max-w-xs leading-relaxed">
+                  WhatsApp status will show as <span className="text-slate-300">Unknown</span> until
+                  each contact messages you or you send them a message.
+                </p>
               </>
             )}
             <button
@@ -848,6 +676,119 @@ function CSVModal({ onClose, onDone }) {
               Done
             </button>
           </div>
+        ) : (
+          <>
+            {/* Tabs */}
+            <div className="flex gap-1 px-5 pt-4">
+              {[
+                ["file", "Upload file"],
+                ["manual", "Paste numbers"],
+              ].map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setTab(k)}
+                  className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${
+                    tab === k
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* File upload */}
+            {tab === "file" && (
+              <div className="p-6 space-y-4">
+                <div
+                  onClick={() => fileRef.current.click()}
+                  className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer transition-colors group"
+                >
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,.xlsx"
+                    className="hidden"
+                    onChange={(e) => setFile(e.target.files[0] || null)}
+                  />
+                  <div className="text-4xl">📂</div>
+                  {file ? (
+                    <p className="text-sm font-medium text-emerald-300">{file.name}</p>
+                  ) : (
+                    <p className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">
+                      Click to upload Excel (.xlsx) or CSV
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-500 text-center leading-relaxed">
+                    First row = headers. Needs a <b>phone</b> column (with country
+                    code). Name, email, tags &amp; opt-in are optional.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={importFile}
+                    disabled={!file || loading}
+                    className="px-5 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
+                  >
+                    {loading ? "Importing…" : "Import file"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Manual numbers */}
+            {tab === "manual" && (
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">
+                    Phone numbers — one per line, or comma-separated
+                  </label>
+                  <textarea
+                    value={numbers}
+                    onChange={(e) => setNumbers(e.target.value)}
+                    rows={6}
+                    placeholder={"919876543210\n919812345678"}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono outline-none focus:border-blue-500 transition-colors resize-none"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {manualCount} number{manualCount === 1 ? "" : "s"} · invalid ones are skipped
+                  </p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1.5 block">
+                    Tags (optional) — comma-separated
+                  </label>
+                  <input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                    placeholder="lead, imported"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500 transition-colors"
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={optedIn}
+                    onChange={(e) => setOptedIn(e.target.checked)}
+                    className="accent-blue-600"
+                  />
+                  <span className="text-xs text-slate-300">
+                    Mark as WhatsApp opted-in <span className="text-slate-500">(optional)</span>
+                  </span>
+                </label>
+                <div className="flex justify-end">
+                  <button
+                    onClick={importManual}
+                    disabled={!manualCount || loading}
+                    className="px-5 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
+                  >
+                    {loading ? "Adding…" : `Add ${manualCount || ""} contact${manualCount === 1 ? "" : "s"}`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -990,7 +931,7 @@ export default function Contacts() {
             >
               <path d="M2 13h12v1.5H2zm6-9.5L12 8H9v5H7V8H4z" />
             </svg>
-            Import CSV
+            Import
           </button>
           <button
             onClick={() => setShowAdd(true)}
@@ -1127,6 +1068,7 @@ export default function Contacts() {
                 {[
                   "Contact",
                   "Phone",
+                  "WhatsApp",
                   "Tags",
                   "Status",
                   "Opted In",
@@ -1234,6 +1176,9 @@ export default function Contacts() {
                       <span className="text-xs font-mono text-slate-400">
                         +{c.wa_id}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <WaStatus status={c.wa_status} profileName={c.profile_name} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1 max-w-[160px]">

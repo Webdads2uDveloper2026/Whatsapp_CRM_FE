@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import api from '../../services/api'
+import TemplateText, { extractVars } from '../../components/TemplateText'
 
 // ── Status config ─────────────────────────────────────────────────────────────
 const ST = {
@@ -8,6 +9,7 @@ const ST = {
   queued:    { cls:'bg-amber-50 text-amber-500 border-amber-200',     dot:'bg-amber-400',   label:'Queued'    },
   running:   { cls:'bg-amber-50 text-amber-600 border-amber-200',     dot:'bg-amber-500 animate-pulse', label:'Sending…' },
   completed: { cls:'bg-emerald-50 text-emerald-600 border-emerald-200', dot:'bg-emerald-500', label:'Sent'   },
+  partial:   { cls:'bg-amber-50 text-amber-600 border-amber-200',     dot:'bg-amber-500',   label:'Partly sent' },
   failed:    { cls:'bg-red-50 text-red-600 border-red-200',           dot:'bg-red-500',     label:'Failed'    },
 }
 
@@ -63,7 +65,6 @@ function useHeaderMedia(mediaPath, overrideUrl) {
 // ── WhatsApp Preview ──────────────────────────────────────────────────────────
 function WaPreview({ templateName, bodyText, variables = {}, headerType, headerText, footerText, buttons = [],
                      headerMediaPath = '', headerMediaUrl = '' }) {
-  const body = (bodyText || '').replace(/\{\{(\w+)\}\}/g, (_, k) => variables[k] || `{{${k}}}`)
   const mediaUrl = useHeaderMedia(headerMediaPath, headerMediaUrl)
   const isMediaHeader = ['image', 'video', 'document'].includes(headerType)
   return (
@@ -96,7 +97,9 @@ function WaPreview({ templateName, bodyText, variables = {}, headerType, headerT
               )}
               <div className="px-2.5 py-2">
                 <p className="text-[10px] text-slate-800 whitespace-pre-wrap leading-relaxed">
-                  {body || <span className="text-slate-300 italic">Preview…</span>}
+                  {bodyText
+                    ? <TemplateText text={bodyText} variables={variables}/>
+                    : <span className="text-slate-300 italic">Preview…</span>}
                 </p>
               </div>
               {footerText && <p className="px-2.5 pb-1.5 text-[8px] text-slate-400">{footerText}</p>}
@@ -126,10 +129,12 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
   const setMode = (m) => onModeChange && onModeChange(m, '')
   const setTagFilter = (t) => onModeChange && onModeChange(mode, t)
 
-  const allOptedIn = contacts.filter(c => c.opted_in)
+  // Every imported contact is selectable — opt-in and tags are optional and do
+  // not gate who can be added to a broadcast.
+  const allContacts = contacts
   const allTags    = [...new Set(contacts.flatMap(c => c.tags || []))]
 
-  const filtered = allOptedIn.filter(c => {
+  const filtered = allContacts.filter(c => {
     const q = search.toLowerCase()
     return (!q || c.profile_name?.toLowerCase().includes(q) || c.wa_id?.includes(q))
         && (!tagFilter || (c.tags||[]).includes(tagFilter))
@@ -141,8 +146,8 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
     return cols[Math.abs(h)%cols.length]
   }
 
-  const audienceCount = mode==='all' ? allOptedIn.length
-    : mode==='tag' ? allOptedIn.filter(c=>(c.tags||[]).includes(tagFilter)).length
+  const audienceCount = mode==='all' ? allContacts.length
+    : mode==='tag' ? allContacts.filter(c=>(c.tags||[]).includes(tagFilter)).length
     : selectedIds.length
 
   return (
@@ -150,7 +155,7 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
       {/* Mode tabs */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { v:'all',  icon:'👥', label:'All Contacts',  sub:`${allOptedIn.length} opted-in` },
+          { v:'all',  icon:'👥', label:'All Contacts',  sub:`${allContacts.length} contacts` },
           { v:'tag',  icon:'🏷️', label:'By Tag',        sub:'Filter segment'                },
           { v:'pick', icon:'☑️', label:'Hand-pick',     sub:'Select manually'               },
         ].map(o => (
@@ -167,7 +172,7 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
       {mode==='all' && (
         <div className="flex items-center gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl">
           <span className="text-xl">✅</span>
-          <p className="text-sm font-semibold text-emerald-700">{allOptedIn.length} opted-in contacts will receive this broadcast</p>
+          <p className="text-sm font-semibold text-emerald-700">All {allContacts.length} contacts will receive this broadcast</p>
         </div>
       )}
 
@@ -175,7 +180,7 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
       {mode==='tag' && (
         <div className="space-y-2">
           <select value={tagFilter} onChange={e => setTagFilter(e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-400 appearance-none cursor-pointer">
+            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 appearance-none cursor-pointer">
             <option value="">— choose a tag —</option>
             {allTags.map(t => <option key={t}>{t}</option>)}
           </select>
@@ -183,7 +188,7 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
             <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
               <span className="text-xl">🏷️</span>
               <p className="text-sm font-semibold text-blue-700">
-                {allOptedIn.filter(c=>(c.tags||[]).includes(tagFilter)).length} contacts tagged <code className="font-mono">"{tagFilter}"</code>
+                {allContacts.filter(c=>(c.tags||[]).includes(tagFilter)).length} contacts tagged <code className="font-mono">"{tagFilter}"</code>
               </p>
             </div>
           )}
@@ -195,9 +200,9 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
         <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
           <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-100 bg-slate-50">
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
-              className="flex-1 bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs outline-none focus:border-blue-400" />
+              className="flex-1 bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-400" />
             <select value={tagFilter} onChange={e=>setTagFilter(e.target.value)}
-              className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs appearance-none cursor-pointer outline-none">
+              className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 appearance-none cursor-pointer outline-none">
               <option value="">All tags</option>
               {allTags.map(t=><option key={t}>{t}</option>)}
             </select>
@@ -213,7 +218,7 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
             </div>
           )}
           <div className="max-h-52 overflow-y-auto">
-            {filtered.length===0 && <p className="py-8 text-center text-slate-400 text-sm">No opted-in contacts</p>}
+            {filtered.length===0 && <p className="py-8 text-center text-slate-400 text-sm">No contacts</p>}
             {filtered.map(c => {
               const sel = selectedIds.includes(c.id)
               return (
@@ -252,11 +257,25 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
 
   useEffect(() => {
     if (tab !== 'contacts') return
+    let cancelled = false
     setLoadingCtx(true)
-    api.get(`/broadcasts/${b.id}/contacts?limit=50`).then(r => {
-      setContacts(r.data.contacts || [])
-      setCtxTotal(r.data.total || 0)
-    }).catch(()=>{}).finally(()=>setLoadingCtx(false))
+    // Page through every recipient so the analytics list is complete, not capped.
+    const fetchAll = async () => {
+      const all = []; let page = 1; let total = 0
+      while (!cancelled) {
+        try {
+          const { data } = await api.get(`/broadcasts/${b.id}/contacts?page=${page}&limit=500`)
+          const batch = data.contacts || []
+          total = data.total || 0
+          all.push(...batch)
+          if (batch.length < 500 || all.length >= total || page >= 40) break
+          page++
+        } catch { break }
+      }
+      if (!cancelled) { setContacts(all); setCtxTotal(total); setLoadingCtx(false) }
+    }
+    fetchAll()
+    return () => { cancelled = true }
   }, [tab, b.id])
 
   const total = b.total_recipients || 0
@@ -373,7 +392,7 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
           {tab==='contacts' && (
             <div>
               <p className="text-sm font-semibold text-slate-700 mb-3">
-                {ctxTotal} contact{ctxTotal!==1?'s':''} in audience
+                {ctxTotal} recipient{ctxTotal!==1?'s':''}
               </p>
               {loadingCtx && <div className="py-8 text-center text-slate-400 text-sm">Loading…</div>}
               {!loadingCtx && contacts.length === 0 && (
@@ -381,7 +400,7 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
               )}
               <div className="space-y-2">
                 {contacts.map(c => (
-                  <div key={c.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <div key={c.id || c.wa_id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                       {(c.profile_name||c.wa_id||'?').slice(0,2).toUpperCase()}
                     </div>
@@ -410,51 +429,162 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
 }
 
 // ── Edit modal ────────────────────────────────────────────────────────────────
-function EditModal({ broadcast: b, templates, onClose, onSaved }) {
-  const [form,   setForm]   = useState({ name:b.name, template_id:'', template_language:b.template_language })
+function EditModal({ broadcast: b, templates, contacts = [], onClose, onSaved }) {
+  const [form, setForm] = useState({
+    // A sent broadcast is edited as a copy — give it a distinct name up front
+    name:              ['draft','scheduled'].includes(b.status) ? (b.name || '') : `${b.name || 'Broadcast'} (copy)`,
+    template_id:       '',
+    template_language: b.template_language || 'en_US',
+    // Seed the audience from the saved broadcast so edits start where it left off
+    audienceMode:      b.audience_type === 'contact_ids' ? 'pick'
+                     : b.audience_type === 'tag'          ? 'tag' : 'all',
+    audienceTag:       (b.audience_tags || [])[0] || '',
+    selectedIds:       b.audience_contact_ids || [],
+    variables:         b.variables || {},
+  })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  // The template the broadcast will actually use: the newly chosen one, or the
+  // current one when "Keep" is selected. Its body {{n}} placeholders decide which
+  // variable inputs to show — a template like promotional_offer needs all filled
+  // or the send aborts with "needs variables […] but supplied none".
+  const effectiveTpl = form.template_id
+    ? templates.find(t => t.id === form.template_id)
+    : templates.find(t => t.name === b.template_name)
+  const bodyText = effectiveTpl?.components?.find(c => c.type === 'BODY')?.text || ''
+  const bodyVars = extractVars(bodyText)
+  const missingVars = bodyVars.filter(v => !(form.variables[v] || '').trim())
+
+  // How many contacts the current audience selection resolves to
+  const audienceCount = form.audienceMode === 'all'
+      ? contacts.length
+      : form.audienceMode === 'tag'
+        ? contacts.filter(c => (c.tags || []).includes(form.audienceTag)).length
+        : form.selectedIds.length
+
+  // Draft & scheduled edit in place; a sent/failed broadcast is immutable, so
+  // editing it produces a NEW draft copy (its analytics stay intact).
+  const inPlace = ['draft', 'scheduled'].includes(b.status)
+
   const save = async e => {
-    e.preventDefault(); setSaving(true); setError('')
+    e.preventDefault()
+    if (audienceCount === 0) { setError('Select at least one contact'); return }
+    if (missingVars.length) { setError(`Fill all template variables: ${missingVars.map(v=>`{{${v}}}`).join(', ')}`); return }
+    setSaving(true); setError('')
     try {
       const tpl = templates.find(t => t.id === form.template_id)
-      await api.patch(`/broadcasts/${b.id}`, {
-        name:             form.name,
-        template_name:    tpl?.name    || b.template_name,
-        template_language: tpl?.language || form.template_language,
-      })
+      // Keep only variables the effective template actually uses
+      const cleanVars = {}
+      bodyVars.forEach(v => { if ((form.variables[v] || '').trim()) cleanVars[v] = form.variables[v] })
+
+      const audience = {
+        audience_type:        form.audienceMode === 'pick' ? 'contact_ids'
+                            : form.audienceMode === 'tag'  ? 'tag' : 'all',
+        audience_tags:        form.audienceMode === 'tag'  ? [form.audienceTag] : [],
+        audience_contact_ids: form.audienceMode === 'pick' ? form.selectedIds : [],
+      }
+
+      if (inPlace) {
+        await api.patch(`/broadcasts/${b.id}`, {
+          name:              form.name,
+          template_name:     tpl?.name     || b.template_name,
+          template_language: tpl?.language  || form.template_language,
+          variables:         cleanVars,
+          ...audience,
+        })
+      } else {
+        // Sent/failed: save the edits as a fresh draft copy rather than mutating history
+        await api.post('/broadcasts', {
+          name:              form.name,
+          template_name:     tpl?.name     || b.template_name,
+          template_language: tpl?.language  || form.template_language,
+          variables:         cleanVars,
+          header_type:       b.header_type || 'none',
+          header_text:       b.header_text || '',
+          header_media:      b.header_media || '',
+          button_payloads:   b.button_payloads || [],
+          components:        b.components || [],
+          schedule_type:     'draft',
+          ...audience,
+        })
+      }
       onSaved(); onClose()
     } catch (e) { setError(e.response?.data?.detail || 'Save failed') }
     setSaving(false)
   }
 
   const inp = "w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all text-slate-700"
+  const lbl = "block text-xs font-semibold text-slate-600 mb-1.5"
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl" onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-sm font-bold text-slate-800">Edit Broadcast</h2>
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 backdrop-blur-sm overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl my-8 shadow-2xl" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white rounded-t-2xl z-10">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">{inPlace ? 'Edit Broadcast' : 'Edit as New Draft'}</h2>
+            {!inPlace && <p className="text-[11px] text-slate-400 mt-0.5">This broadcast was already sent — your changes are saved as a new draft.</p>}
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
         </div>
-        <form onSubmit={save} className="p-6 space-y-4">
+        <form onSubmit={save} className="p-6 space-y-5">
           {error && <div className="bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2.5 rounded-xl">{error}</div>}
+          {!inPlace && (
+            <div className="bg-blue-50 border border-blue-200 text-blue-700 text-xs px-3 py-2.5 rounded-xl">
+              You're editing a <strong>{b.status}</strong> broadcast. Saving creates a new <strong>draft</strong> — the original stays unchanged with its analytics.
+            </div>
+          )}
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Campaign Name</label>
-            <input required value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} className={inp} />
+            <label className={lbl}>Campaign Name</label>
+            <input required value={form.name} onChange={e=>set('name', e.target.value)} className={inp} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Change Template (optional)</label>
-            <select value={form.template_id} onChange={e=>setForm(p=>({...p,template_id:e.target.value}))} className={`${inp} appearance-none cursor-pointer`}>
+            <label className={lbl}>Change Template (optional)</label>
+            <select value={form.template_id} onChange={e=>set('template_id', e.target.value)} className={`${inp} appearance-none cursor-pointer`}>
               <option value="">— Keep: {b.template_name} —</option>
               {templates.map(t=><option key={t.id} value={t.id}>{t.name} ({t.language})</option>)}
             </select>
           </div>
-          <div className="flex gap-3 pt-2">
+          {bodyVars.length > 0 && (
+            <div>
+              <label className={lbl}>Template Variables <span className="text-red-400">*</span></label>
+              <div className="space-y-2">
+                {bodyVars.map(v => (
+                  <div key={v} className="flex items-center gap-2">
+                    <code className={`text-[11px] px-2 py-1 rounded font-mono shrink-0 border ${(form.variables[v]||'').trim()?'bg-emerald-100 text-emerald-800 border-emerald-200':'bg-amber-50 text-amber-700 border-dashed border-amber-300'}`}>{`{{${v}}}`}</code>
+                    <input
+                      value={form.variables[v] || ''}
+                      onChange={e=>setForm(p=>({...p, variables:{...p.variables, [v]:e.target.value}}))}
+                      placeholder={`Value for {{${v}}}`}
+                      className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-400"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1.5">This template needs all {bodyVars.length} value{bodyVars.length!==1?'s':''} filled before it can send.</p>
+            </div>
+          )}
+          <div>
+            <label className={lbl}>Audience <span className="text-red-400">*</span></label>
+            <ContactSelector
+              contacts={contacts}
+              selectedIds={form.selectedIds}
+              audienceMode={form.audienceMode}
+              audienceTag={form.audienceTag}
+              onModeChange={(mode, tag) => {
+                set('audienceMode', mode)
+                if (tag !== undefined) set('audienceTag', tag)
+                set('selectedIds', [])
+              }}
+              onChange={ids => set('selectedIds', ids)}
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">Cancel</button>
             <button type="submit" disabled={saving} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white text-sm font-semibold rounded-xl transition-colors">
-              {saving ? 'Saving…' : 'Save Changes'}
+              {saving ? 'Saving…' : inPlace ? `Save Changes (${audienceCount} recipient${audienceCount!==1?'s':''})` : `Save as Draft (${audienceCount} recipient${audienceCount!==1?'s':''})`}
             </button>
           </div>
         </form>
@@ -470,6 +600,8 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
   const [step,   setStep]   = useState(0)
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmChecked, setConfirmChecked] = useState(false)
 
   const [form, setForm] = useState({
     name:'', audienceMode:'all', audienceTag:'', selectedIds:[],
@@ -495,14 +627,14 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
       headerMedia:'', buttons:btns }))
   }
 
-  const bodyVars = [...new Set((form.bodyText.match(/\{\{(\w+)\}\}/g)||[]).map(m=>m.replace(/[{}]/g,'')))]
+  const bodyVars = extractVars(form.bodyText)
 
-  const allOptedIn = contacts.filter(c=>c.opted_in)
+  // All contacts are eligible — opt-in is not required to receive a broadcast.
   const audienceCount = useMemo(() => {
-    if (form.audienceMode==='all')  return allOptedIn.length
-    if (form.audienceMode==='tag')  return allOptedIn.filter(c=>(c.tags||[]).includes(form.audienceTag)).length
+    if (form.audienceMode==='all')  return contacts.length
+    if (form.audienceMode==='tag')  return contacts.filter(c=>(c.tags||[]).includes(form.audienceTag)).length
     return form.selectedIds.length
-  }, [form.audienceMode, form.audienceTag, form.selectedIds.length, allOptedIn.length])
+  }, [form.audienceMode, form.audienceTag, form.selectedIds.length, contacts])
 
   const canNext = [
     form.name.trim()!=='' && (form.audienceMode!=='tag'||form.audienceTag!=='') && (form.audienceMode!=='pick'||form.selectedIds.length>0),
@@ -678,9 +810,13 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
                         <label className={lbl}>Variables</label>
                         {bodyVars.map(v=>(
                           <div key={v} className="flex items-center gap-2 mb-2">
-                            <code className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-mono shrink-0">{`{{${v}}}`}</code>
+                            <code className={`text-xs px-2 py-1 rounded font-mono shrink-0 border transition-colors ${
+                              (form.variables[v]||'').trim()
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                : 'bg-amber-50 text-amber-700 border-dashed border-amber-300'
+                            }`}>{`{{${v}}}`}</code>
                             <input value={form.variables[v]||''} onChange={e=>setForm(p=>({...p,variables:{...p.variables,[v]:e.target.value}}))}
-                              placeholder={`Value for ${v}`} className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"/>
+                              placeholder={`Value for ${v}`} className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-medium placeholder-slate-400 placeholder:font-normal outline-none focus:border-blue-400"/>
                           </div>
                         ))}
                       </div>
@@ -700,11 +836,11 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
                       {form.buttons.map((b,i)=>(
                         <div key={i} className="flex gap-2 mb-2">
                           <select value={b.type} onChange={e=>setForm(p=>({...p,buttons:p.buttons.map((x,j)=>j===i?{...x,type:e.target.value}:x)}))}
-                            className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white appearance-none outline-none">
+                            className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 bg-white appearance-none outline-none">
                             <option value="reply">Reply</option><option value="url">URL</option><option value="phone">Call</option>
                           </select>
                           <input value={b.label} placeholder="Label" onChange={e=>setForm(p=>({...p,buttons:p.buttons.map((x,j)=>j===i?{...x,label:e.target.value}:x)}))}
-                            className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-400"/>
+                            className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-400"/>
                           <button onClick={()=>setForm(p=>({...p,buttons:p.buttons.filter((_,j)=>j!==i)}))} className="text-slate-400 hover:text-red-500 text-lg leading-none">×</button>
                         </div>
                       ))}
@@ -791,15 +927,20 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm">
                 <p className="font-bold text-amber-800 mb-2">⚠ Before sending</p>
                 <ul className="text-xs text-amber-700 space-y-1 list-disc list-inside">
-                  <li>Messages will be sent to <strong>{audienceCount}</strong> opted-in contacts</li>
+                  <li>Messages will be sent to <strong>{audienceCount}</strong> contact{audienceCount!==1?'s':''}</li>
                   <li>Only APPROVED templates work for outbound broadcasts</li>
                   <li>Meta requires components type in <strong>lowercase</strong> (header, body, button) — handled automatically</li>
                   <li>Cannot be undone once sending starts</li>
                 </ul>
               </div>
-              <label className="flex items-center gap-3 p-4 bg-slate-50 border border-slate-200 rounded-2xl cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 accent-blue-600" required/>
-                <span className="text-sm text-slate-700">I confirm this broadcast is ready to send to <strong>{audienceCount} contacts</strong></span>
+              <label className={`flex items-center gap-3 p-4 border rounded-2xl cursor-pointer transition-colors ${confirmChecked?'bg-emerald-50 border-emerald-300':'bg-slate-50 border-slate-200'}`}>
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={confirmChecked}
+                  onChange={e=>setConfirmChecked(e.target.checked)}
+                />
+                <span className="text-sm text-slate-700">I confirm this broadcast is ready to send to <strong>{audienceCount} contact{audienceCount!==1?'s':''}</strong></span>
               </label>
             </div>
           )}
@@ -815,13 +956,53 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
                   className={`px-6 py-2.5 text-sm font-semibold rounded-xl transition-colors ${canNext?'bg-blue-600 hover:bg-blue-700 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
                   Continue →
                 </button>
-              : <button type="button" onClick={submit} disabled={saving}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 text-white text-sm font-semibold rounded-xl transition-colors flex items-center gap-2">
+              : <button type="button"
+                  onClick={()=>{ if(!confirmChecked){ setError('Please tick the confirmation box first'); return } if(audienceCount===0){ setError('No contacts selected'); return } setError(''); setConfirmOpen(true) }}
+                  disabled={saving || !confirmChecked}
+                  title={!confirmChecked ? 'Tick the confirmation box to continue' : ''}
+                  className={`px-6 py-2.5 text-sm font-semibold rounded-xl transition-colors flex items-center gap-2 ${confirmChecked && !saving ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
                   {saving ? <><svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity=".3"/><path d="M22 12A10 10 0 0012 2" stroke="white" strokeWidth="3" strokeLinecap="round"/></svg>Launching…</> : form.scheduleType==='now' ? '🚀 Send Broadcast' : '⏰ Schedule'}
                 </button>
             }
           </div>
         </div>
+
+        {/* Confirmation dialog — nothing is sent until the user confirms here */}
+        {confirmOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={()=>!saving&&setConfirmOpen(false)}>
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" onClick={e=>e.stopPropagation()}>
+              <div className="p-6">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-11 h-11 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-xl">
+                    {form.scheduleType==='now' ? '🚀' : '⏰'}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">
+                      {form.scheduleType==='now' ? 'Send this broadcast now?' : 'Schedule this broadcast?'}
+                    </h3>
+                    <p className="text-xs text-slate-500">This cannot be undone once sending starts.</p>
+                  </div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1.5 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Template</span><span className="font-semibold text-slate-700">{tpl?.name || '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Recipients</span><span className="font-bold text-emerald-600">{audienceCount.toLocaleString()} contact{audienceCount===1?'':'s'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">When</span><span className="font-semibold text-slate-700">{form.scheduleType==='now' ? 'Immediately' : (form.scheduleTime || 'Not set')}</span></div>
+                </div>
+                {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
+              </div>
+              <div className="flex gap-3 px-6 pb-6">
+                <button type="button" disabled={saving} onClick={()=>setConfirmOpen(false)}
+                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-100 transition-colors disabled:opacity-50">
+                  Cancel
+                </button>
+                <button type="button" disabled={saving} onClick={submit}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+                  {saving ? <><svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity=".3"/><path d="M22 12A10 10 0 0012 2" stroke="white" strokeWidth="3" strokeLinecap="round"/></svg>Sending…</> : (form.scheduleType==='now' ? 'Yes, send now' : 'Yes, schedule')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -892,12 +1073,22 @@ export default function Broadcasts() {
 
   const duplicate = async b => {
     try {
+      // Copy the whole configuration — audience, template payload and header —
+      // so the copy is a faithful, editable draft, not a stripped-down shell.
       await api.post('/broadcasts', {
-        name:              `${b.name} (copy)`,
-        template_name:     b.template_name,
-        template_language: b.template_language,
-        audience_type:     b.audience_type || 'all',
-        schedule_type:     'draft',
+        name:                 `${b.name} (copy)`,
+        template_name:        b.template_name,
+        template_language:    b.template_language,
+        audience_type:        b.audience_type || 'all',
+        audience_tags:        b.audience_tags || [],
+        audience_contact_ids: b.audience_contact_ids || [],
+        components:           b.components || [],
+        variables:            b.variables || {},
+        header_type:          b.header_type || 'none',
+        header_text:          b.header_text || '',
+        header_media:         b.header_media || '',
+        button_payloads:      b.button_payloads || [],
+        schedule_type:        'draft',
       })
       load()
     } catch (e) { alert(e.response?.data?.detail || 'Error') }
@@ -911,9 +1102,11 @@ export default function Broadcasts() {
 
   const stats = {
     total:     broadcasts.length,
-    completed: broadcasts.filter(b=>b.status==='completed').length,
+    // "Sent" counts fully- and partly-delivered campaigns (partial still reached people)
+    completed: broadcasts.filter(b=>b.status==='completed'||b.status==='partial').length,
     scheduled: broadcasts.filter(b=>b.status==='scheduled').length,
-    reach:     broadcasts.reduce((a,b)=>a+(b.total_recipients||0),0),
+    // Reach = messages actually sent, not audience size (which counts failures too)
+    reach:     broadcasts.reduce((a,b)=>a+(b.sent_count||0),0),
   }
 
   return (
@@ -1035,9 +1228,10 @@ export default function Broadcasts() {
                       {(b.status==='running'||b.status==='queued'||b.status==='failed')&&(
                         <button onClick={()=>resetBc(b.id)} title="Reset to draft" className="p-1.5 text-amber-500 hover:bg-amber-50 rounded-lg transition-colors font-bold text-sm">↺</button>
                       )}
-                      {b.status==='draft'&&(
-                        <button onClick={()=>setEditing(b)} title="Edit" className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors text-sm">✏️</button>
-                      )}
+                      <button
+                        onClick={()=>setEditing(b)}
+                        title={['draft','scheduled'].includes(b.status) ? 'Edit' : 'Edit as new draft'}
+                        className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors text-sm">✏️</button>
                       <button onClick={()=>duplicate(b)} title="Duplicate" className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors text-sm">⧉</button>
                       <button onClick={()=>{ if(confirm('Delete?')) deleteBc(b.id) }} title="Delete" className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors text-sm">🗑</button>
                     </div>
@@ -1072,6 +1266,7 @@ export default function Broadcasts() {
         <EditModal
           broadcast={editing}
           templates={templates}
+          contacts={contacts}
           onClose={()=>setEditing(null)}
           onSaved={()=>{ load(); setEditing(null) }}
         />
