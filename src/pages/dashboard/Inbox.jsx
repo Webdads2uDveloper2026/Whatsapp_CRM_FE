@@ -176,6 +176,26 @@ function Tick({ status }) {
   return null;
 }
 
+// Turn a Meta delivery error into a short, human message the user can act on.
+function friendlyWaError(error) {
+  if (!error) return "Delivery failed. Please try again.";
+  const code = error.code;
+  const detail = (error.details || error.message || error.title || "").toString();
+  const BY_CODE = {
+    131053: "This image format isn't supported by WhatsApp. Send a JPG or PNG (WebP isn't allowed for photos).",
+    131047: "The 24-hour window is closed. Send an approved template to re-open the chat.",
+    131026: "This number isn't a valid WhatsApp user.",
+    131051: "Unsupported message type.",
+    132000: "Template variables don't match the approved template.",
+    132001: "Template not found or not approved.",
+    133010: "Your WhatsApp number isn't registered with the Cloud API.",
+    130472: "Too many messages sent to this number recently — try later.",
+  };
+  if (code && BY_CODE[code]) return BY_CODE[code];
+  if (/webp/i.test(detail)) return BY_CODE[131053];
+  return detail || "Delivery failed. Please try again.";
+}
+
 function useProxiedMediaUrl(mediaId) {
   const [url, setUrl] = useState(null);
   const [error, setError] = useState(false);
@@ -1549,6 +1569,18 @@ export default function Inbox() {
             </span>
             {isOut && <Tick status={m.status} />}
           </div>
+
+          {/* Inline delivery-failure reason so the user sees why it failed */}
+          {isOut && m.status === "failed" && (
+            <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-red-950/40 border border-red-900/50 max-w-full">
+              <p className="text-[10px] font-semibold text-red-400">
+                ⚠ Not delivered{m.error?.code ? ` (#${m.error.code})` : ""}
+              </p>
+              <p className="text-[10px] text-red-300/90 leading-snug">
+                {friendlyWaError(m.error)}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );

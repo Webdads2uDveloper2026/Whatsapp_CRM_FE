@@ -7,7 +7,10 @@ import image2 from '../../assets/webdadsicon.svg'
 const NAV = [
   { to:'/dashboard',            emoji:'⊞', label:'Dashboard'   },
   { to:'/dashboard/inbox',      emoji:'💬', label:'Inbox'       },
+  { to:'/dashboard/team-inbox', emoji:'📥', label:'Team Inbox'  },
   { to:'/dashboard/contacts',   emoji:'👥', label:'Contacts'    },
+  { to:'/dashboard/segments',   emoji:'🧩', label:'Segments'    },
+  { to:'/dashboard/groups',     emoji:'💬', label:'Groups'      },
   { to:'/dashboard/broadcasts', emoji:'📢', label:'Broadcasts'  },
   { to:'/dashboard/templates',  emoji:'📋', label:'Templates'   },
   { to:'/dashboard/analytics',  emoji:'📊', label:'Analytics'   },

@@ -20,8 +20,13 @@ import Onboarding  from './pages/onboarding/Onboarding'
 import Layout      from './pages/dashboard/Layout'
 import Dashboard   from './pages/dashboard/Dashboard'
 import Inbox       from './pages/dashboard/Inbox'
-import Contacts    from './pages/dashboard/Contacts'
-import Broadcasts  from './pages/dashboard/Broadcasts'
+import Contacts       from './pages/dashboard/Contacts'
+import TeamInbox      from './pages/dashboard/TeamInbox'
+import TeamSettings   from './pages/dashboard/TeamSettings'
+import ContactSegments from './pages/dashboard/ContactSegments'
+import WhatsAppGroups     from './pages/dashboard/WhatsAppGroups'
+import WhatsAppGroupDetail from './pages/dashboard/WhatsAppGroupDetail'
+import Broadcasts     from './pages/dashboard/Broadcasts'
 import Templates   from './pages/dashboard/Templates'
 import Settings    from './pages/dashboard/Settings'
 import Automations from './pages/dashboard/Automations'
@@ -91,7 +96,12 @@ export default function App() {
         <Route path="/dashboard"  element={<ProtectedAdmin><Layout /></ProtectedAdmin>}>
           <Route index               element={<Dashboard />} />
           <Route path="inbox"        element={<Inbox />} />
+          <Route path="team-inbox"       element={<TeamInbox />} />
+          <Route path="team-inbox/teams" element={<TeamSettings />} />
           <Route path="contacts"     element={<Contacts />} />
+          <Route path="segments"     element={<ContactSegments />} />
+          <Route path="groups"          element={<WhatsAppGroups />} />
+          <Route path="groups/:groupId" element={<WhatsAppGroupDetail />} />
           <Route path="broadcasts"   element={<Broadcasts />} />
           <Route path="templates"    element={<Templates />} />
           <Route path="analytics"    element={<Analytics />} />
