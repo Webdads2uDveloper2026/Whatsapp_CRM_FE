@@ -184,6 +184,7 @@ function friendlyWaError(error) {
   const BY_CODE = {
     131053: "This image format isn't supported by WhatsApp. Send a JPG or PNG (WebP isn't allowed for photos).",
     131047: "The 24-hour window is closed. Send an approved template to re-open the chat.",
+    131049: "WhatsApp capped marketing messages to this user (per-user frequency limit). Not a delivery bug — use a Utility template or message them less often. Resending won't help.",
     131026: "This number isn't a valid WhatsApp user.",
     131051: "Unsupported message type.",
     132000: "Template variables don't match the approved template.",

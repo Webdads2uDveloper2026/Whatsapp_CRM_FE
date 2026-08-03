@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
+import BulkAddContacts from "../../components/BulkAddContacts";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 
@@ -559,242 +560,6 @@ function ContactDrawer({ contact, agents, onUpdate, onClose, onOpenChat }) {
   );
 }
 
-// ── Import Contacts Modal (file upload + manual numbers) ──────────────────────
-// Supports .xlsx and .csv uploads (parsed server-side) and pasting raw phone
-// numbers with no other details. Tags and WhatsApp opt-in are optional in both.
-function CSVModal({ onClose, onDone }) {
-  const [tab, setTab] = useState("file"); // file | manual
-  const [file, setFile] = useState(null);
-  const [numbers, setNumbers] = useState("");
-  const [tags, setTags] = useState("");
-  const [optedIn, setOptedIn] = useState(false);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const fileRef = useRef();
-
-  const tagList = () =>
-    tags.split(/[,;]/).map((t) => t.trim()).filter(Boolean);
-
-  const importFile = async () => {
-    if (!file) return;
-    setLoading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { data } = await api.post("/contacts/import-file", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      setResult(data);
-      onDone();
-    } catch (e) {
-      setResult({ error: e.response?.data?.detail || "Import failed" });
-    }
-    setLoading(false);
-  };
-
-  const importManual = async () => {
-    const nums = numbers.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean);
-    if (!nums.length) return;
-    setLoading(true);
-    try {
-      const { data } = await api.post("/contacts/raw", {
-        numbers: nums,
-        tags: tagList(),
-        opted_in: optedIn,
-      });
-      setResult(data);
-      onDone();
-    } catch (e) {
-      setResult({ error: e.response?.data?.detail || "Import failed" });
-    }
-    setLoading(false);
-  };
-
-  const manualCount = numbers.split(/[\n,;]+/).map((n) => n.trim()).filter(Boolean).length;
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-5 border-b border-slate-800">
-          <h2 className="text-sm font-semibold">Import contacts</h2>
-          <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-slate-200 transition-colors text-xl leading-none"
-          >
-            &times;
-          </button>
-        </div>
-
-        {/* Result screen */}
-        {result ? (
-          <div className="p-8 flex flex-col items-center gap-4 text-center">
-            {result.error ? (
-              <>
-                <div className="w-14 h-14 rounded-full bg-red-900/20 border border-red-800/40 flex items-center justify-center text-2xl">
-                  ✗
-                </div>
-                <h3 className="text-sm font-semibold text-red-400">Import failed</h3>
-                <p className="text-xs text-slate-500">{result.error}</p>
-              </>
-            ) : (
-              <>
-                <div className="w-14 h-14 rounded-full bg-emerald-900/20 border border-emerald-800/40 flex items-center justify-center text-2xl">
-                  ✓
-                </div>
-                <h3 className="text-sm font-semibold">Import complete</h3>
-                <div className="flex gap-6 mt-2">
-                  {[
-                    ["Created", result.created, "text-emerald-400"],
-                    ["Skipped", result.skipped, "text-slate-400"],
-                    ["Invalid", result.invalid ?? 0, "text-amber-400"],
-                    ["Total", result.total, "text-white"],
-                  ].map(([l, v, c]) => (
-                    <div key={l} className="flex flex-col items-center gap-1">
-                      <span className={`text-2xl font-bold ${c}`}>{v}</span>
-                      <span className="text-[10px] text-slate-500 uppercase tracking-wider">
-                        {l}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-500 max-w-xs leading-relaxed">
-                  WhatsApp status will show as <span className="text-slate-300">Unknown</span> until
-                  each contact messages you or you send them a message.
-                </p>
-              </>
-            )}
-            <button
-              onClick={onClose}
-              className="mt-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-xl transition-colors"
-            >
-              Done
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Tabs */}
-            <div className="flex gap-1 px-5 pt-4">
-              {[
-                ["file", "Upload file"],
-                ["manual", "Paste numbers"],
-              ].map(([k, label]) => (
-                <button
-                  key={k}
-                  onClick={() => setTab(k)}
-                  className={`flex-1 py-2 text-xs font-medium rounded-lg transition-colors ${
-                    tab === k
-                      ? "bg-blue-600 text-white"
-                      : "bg-slate-800 text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* File upload */}
-            {tab === "file" && (
-              <div className="p-6 space-y-4">
-                <div
-                  onClick={() => fileRef.current.click()}
-                  className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer transition-colors group"
-                >
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".csv,.xlsx"
-                    className="hidden"
-                    onChange={(e) => setFile(e.target.files[0] || null)}
-                  />
-                  <div className="text-4xl">📂</div>
-                  {file ? (
-                    <p className="text-sm font-medium text-emerald-300">{file.name}</p>
-                  ) : (
-                    <p className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">
-                      Click to upload Excel (.xlsx) or CSV
-                    </p>
-                  )}
-                  <p className="text-xs text-slate-500 text-center leading-relaxed">
-                    First row = headers. Needs a <b>phone</b> column (with country
-                    code). Name, email, tags &amp; opt-in are optional.
-                  </p>
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    onClick={importFile}
-                    disabled={!file || loading}
-                    className="px-5 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
-                  >
-                    {loading ? "Importing…" : "Import file"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Manual numbers */}
-            {tab === "manual" && (
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="text-xs text-slate-400 mb-1.5 block">
-                    Phone numbers — one per line, or comma-separated
-                  </label>
-                  <textarea
-                    value={numbers}
-                    onChange={(e) => setNumbers(e.target.value)}
-                    rows={6}
-                    placeholder={"919876543210\n919812345678"}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono outline-none focus:border-blue-500 transition-colors resize-none"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    {manualCount} number{manualCount === 1 ? "" : "s"} · invalid ones are skipped
-                  </p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 mb-1.5 block">
-                    Tags (optional) — comma-separated
-                  </label>
-                  <input
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder="lead, imported"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500 transition-colors"
-                  />
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={optedIn}
-                    onChange={(e) => setOptedIn(e.target.checked)}
-                    className="accent-blue-600"
-                  />
-                  <span className="text-xs text-slate-300">
-                    Mark as WhatsApp opted-in <span className="text-slate-500">(optional)</span>
-                  </span>
-                </label>
-                <div className="flex justify-end">
-                  <button
-                    onClick={importManual}
-                    disabled={!manualCount || loading}
-                    className="px-5 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl transition-colors"
-                  >
-                    {loading ? "Adding…" : `Add ${manualCount || ""} contact${manualCount === 1 ? "" : "s"}`}
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Main Contacts Page ────────────────────────────────────────────────────────
 export default function Contacts() {
   const [contacts, setContacts] = useState([]);
@@ -1268,16 +1033,30 @@ export default function Contacts() {
             >
               ←
             </button>
-            {[...Array(Math.min(pages, 7))].map((_, i) => (
-              <button
-                key={i + 1}
-                onClick={() => load(i + 1)}
-                className={`w-8 h-8 flex items-center justify-center text-xs rounded-lg border transition-colors
-                  ${page === i + 1 ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"}`}
-              >
-                {i + 1}
-              </button>
-            ))}
+            {(() => {
+              // Windowed page numbers centred on the current page, so every page
+              // is reachable by number even when there are hundreds of them.
+              const span = 5;
+              let start = Math.max(1, page - Math.floor(span / 2));
+              let end = Math.min(pages, start + span - 1);
+              start = Math.max(1, end - span + 1);
+              const nums = [];
+              for (let n = start; n <= end; n++) nums.push(n);
+              const btn = (n, label = n) => (
+                <button key={label} onClick={() => load(n)}
+                  className={`min-w-8 h-8 px-1.5 flex items-center justify-center text-xs rounded-lg border transition-colors
+                    ${page === n ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700"}`}>
+                  {label}
+                </button>
+              );
+              return (
+                <>
+                  {start > 1 && <>{btn(1)}<span className="text-slate-600 px-0.5">…</span></>}
+                  {nums.map(n => btn(n))}
+                  {end < pages && <><span className="text-slate-600 px-0.5">…</span>{btn(pages)}</>}
+                </>
+              );
+            })()}
             <button
               disabled={page === pages}
               onClick={() => load(page + 1)}
@@ -1320,7 +1099,7 @@ export default function Contacts() {
       )}
 
       {showImport && (
-        <CSVModal onClose={() => setShowImport(false)} onDone={() => load(1)} />
+        <BulkAddContacts onClose={() => setShowImport(false)} onDone={() => load(1)} />
       )}
     </div>
   );

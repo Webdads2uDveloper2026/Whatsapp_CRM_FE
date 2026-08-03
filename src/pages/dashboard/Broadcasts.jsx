@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import api from '../../services/api'
 import TemplateText, { extractVars } from '../../components/TemplateText'
+import BulkAddContacts from '../../components/BulkAddContacts'
 
 // ── Status config ─────────────────────────────────────────────────────────────
 const ST = {
@@ -20,6 +21,19 @@ function Badge({ status }) {
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`}/>{s.label}
     </span>
   )
+}
+
+// Per-recipient delivery status in the broadcast Contacts tab.
+const DELIVERY = {
+  sent:      { cls:'bg-blue-50 text-blue-600 border-blue-200',        label:'Sent'      },
+  delivered: { cls:'bg-emerald-50 text-emerald-600 border-emerald-200', label:'Delivered' },
+  read:      { cls:'bg-violet-50 text-violet-600 border-violet-200',    label:'Read'      },
+  failed:    { cls:'bg-red-50 text-red-600 border-red-200',             label:'Failed'    },
+  pending:   { cls:'bg-slate-100 text-slate-500 border-slate-200',      label:'Pending'   },
+}
+function DeliveryBadge({ status }) {
+  const s = DELIVERY[status] || DELIVERY.pending
+  return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${s.cls}`}>{s.label}</span>
 }
 
 const TZ = 'Asia/Kolkata'
@@ -249,24 +263,39 @@ function ContactSelector({ contacts, selectedIds, onChange, audienceMode, audien
 }
 
 // ── View / Details modal ──────────────────────────────────────────────────────
-function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset }) {
+function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset, onResent }) {
+  const [detail,        setDetail]       = useState(null)   // fresh doc w/ live analytics
   const [contacts,      setContacts]     = useState([])
   const [loadingCtx,    setLoadingCtx]   = useState(false)
   const [ctxTotal,      setCtxTotal]     = useState(0)
+  const [statusCounts,  setStatusCounts] = useState(null)
+  const [statusFilter,  setStatusFilter] = useState('')      // '' | sent | delivered | read | failed
   const [tab,           setTab]          = useState('details')
+  const [resending,     setResending]    = useState(false)
+  const [resendMsg,     setResendMsg]    = useState('')
+
+  // Pull fresh analytics (computed from real messages) so Failed etc. are accurate,
+  // even for older broadcasts whose stored counters were never updated.
+  useEffect(() => {
+    let cancelled = false
+    api.get(`/broadcasts/${b.id}`).then(r => { if (!cancelled) setDetail(r.data) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [b.id])
 
   useEffect(() => {
     if (tab !== 'contacts') return
     let cancelled = false
     setLoadingCtx(true)
-    // Page through every recipient so the analytics list is complete, not capped.
+    const qs = statusFilter ? `&status=${statusFilter}` : ''
+    // Page through every recipient so the list is complete, not capped.
     const fetchAll = async () => {
       const all = []; let page = 1; let total = 0
       while (!cancelled) {
         try {
-          const { data } = await api.get(`/broadcasts/${b.id}/contacts?page=${page}&limit=500`)
+          const { data } = await api.get(`/broadcasts/${b.id}/contacts?page=${page}&limit=500${qs}`)
           const batch = data.contacts || []
           total = data.total || 0
+          if (data.status_counts) setStatusCounts(data.status_counts)
           all.push(...batch)
           if (batch.length < 500 || all.length >= total || page >= 40) break
           page++
@@ -276,9 +305,29 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
     }
     fetchAll()
     return () => { cancelled = true }
-  }, [tab, b.id])
+  }, [tab, b.id, statusFilter])
 
-  const total = b.total_recipients || 0
+  const stat  = detail || b
+  const a     = stat.analytics || {}
+  const total = a.total ?? stat.total_recipients ?? 0
+  const nSent      = a.sent      ?? stat.sent_count      ?? 0
+  const nDelivered = a.delivered ?? stat.delivered_count ?? 0
+  const nRead      = a.read      ?? stat.read_count      ?? 0
+  const nFailed    = a.failed    ?? stat.failed_count    ?? 0
+
+  const failedCount = statusCounts?.failed ?? nFailed
+  const resendFailed = async () => {
+    if (!confirm(`Resend the template to ${failedCount.toLocaleString()} failed recipient(s)? This starts a new broadcast.`)) return
+    setResending(true); setResendMsg('')
+    try {
+      const { data } = await api.post(`/broadcasts/${b.id}/resend-failed`)
+      setResendMsg(data.info || `Resending to ${data.recipients} recipients`)
+      onResent && onResent()
+    } catch (e) {
+      setResendMsg(e.response?.data?.detail || 'Resend failed')
+    }
+    setResending(false)
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -358,10 +407,10 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-3">
                 {[
-                  { l:'Total', v:total,               c:'text-slate-700', bg:'bg-slate-50' },
-                  { l:'Sent',  v:b.sent_count||0,     c:'text-blue-600',  bg:'bg-blue-50'  },
-                  { l:'Delivered', v:b.delivered_count||0, c:'text-emerald-600', bg:'bg-emerald-50' },
-                  { l:'Read',  v:b.read_count||0,     c:'text-violet-600',bg:'bg-violet-50'},
+                  { l:'Total',  v:total,     c:'text-slate-700',  bg:'bg-slate-50' },
+                  { l:'Sent',   v:nSent,     c:'text-blue-600',   bg:'bg-blue-50'  },
+                  { l:'Delivered', v:nDelivered, c:'text-emerald-600', bg:'bg-emerald-50' },
+                  { l:'Failed', v:nFailed,   c:'text-red-600',    bg:'bg-red-50'   },
                 ].map(s => (
                   <div key={s.l} className={`${s.bg} rounded-xl p-4 text-center border border-slate-100`}>
                     <p className={`text-2xl font-bold ${s.c}`}>{s.v.toLocaleString()}</p>
@@ -370,10 +419,10 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
                 ))}
               </div>
               {[
-                { l:'Sent',      v:b.sent_count||0,      color:'bg-blue-400'    },
-                { l:'Delivered', v:b.delivered_count||0, color:'bg-emerald-400' },
-                { l:'Read',      v:b.read_count||0,      color:'bg-violet-400'  },
-                { l:'Failed',    v:b.failed_count||0,    color:'bg-red-400'     },
+                { l:'Sent',      v:nSent,      color:'bg-blue-400'    },
+                { l:'Delivered', v:nDelivered, color:'bg-emerald-400' },
+                { l:'Read',      v:nRead,      color:'bg-violet-400'  },
+                { l:'Failed',    v:nFailed,    color:'bg-red-400'     },
               ].map(r => (
                 <div key={r.l}>
                   <div className="flex justify-between text-xs mb-1">
@@ -391,12 +440,40 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
           {/* Contacts tab */}
           {tab==='contacts' && (
             <div>
-              <p className="text-sm font-semibold text-slate-700 mb-3">
-                {ctxTotal} recipient{ctxTotal!==1?'s':''}
-              </p>
+              {/* Status filter chips (counts from real messages) */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {[
+                  { k:'',          l:'All',       n:statusCounts?.total },
+                  { k:'sent',      l:'Sent',      n:statusCounts?.sent },
+                  { k:'delivered', l:'Delivered', n:statusCounts?.delivered },
+                  { k:'read',      l:'Read',      n:statusCounts?.read },
+                  { k:'failed',    l:'Failed',    n:statusCounts?.failed },
+                ].map(f => (
+                  <button key={f.k||'all'} onClick={()=>setStatusFilter(f.k)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${statusFilter===f.k
+                      ? (f.k==='failed'?'bg-red-600 border-red-600 text-white':'bg-blue-600 border-blue-600 text-white')
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                    {f.l}{f.n!=null?` · ${f.n.toLocaleString()}`:''}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-sm font-semibold text-slate-700">
+                  {ctxTotal.toLocaleString()} {statusFilter?`${statusFilter} `:''}recipient{ctxTotal!==1?'s':''}
+                </p>
+                {failedCount > 0 && (
+                  <button onClick={resendFailed} disabled={resending}
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:bg-slate-300 rounded-lg transition-colors whitespace-nowrap">
+                    {resending ? 'Resending…' : `↻ Resend to ${failedCount.toLocaleString()} failed`}
+                  </button>
+                )}
+              </div>
+              {resendMsg && (
+                <div className="mb-3 bg-blue-50 border border-blue-200 text-blue-700 text-xs px-3 py-2 rounded-xl">{resendMsg}</div>
+              )}
               {loadingCtx && <div className="py-8 text-center text-slate-400 text-sm">Loading…</div>}
               {!loadingCtx && contacts.length === 0 && (
-                <div className="py-8 text-center text-slate-400 text-sm">No contacts found</div>
+                <div className="py-8 text-center text-slate-400 text-sm">No {statusFilter||''} recipients</div>
               )}
               <div className="space-y-2">
                 {contacts.map(c => (
@@ -407,19 +484,16 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset })
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-700 truncate">{c.profile_name || <span className="text-slate-400 italic">No name</span>}</p>
                       <p className="text-xs text-slate-400 font-mono">+{c.wa_id}</p>
+                      {c.status==='failed' && c.error && (
+                        <p className="text-[11px] text-red-500 mt-0.5 truncate" title={c.error.details||c.error.message}>
+                          ⚠ {c.error.details || c.error.message || `Error ${c.error.code||''}`}
+                        </p>
+                      )}
                     </div>
-                    {(c.tags||[]).map(t=>(
-                      <span key={t} className="text-[10px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full hidden sm:block">{t}</span>
-                    ))}
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${c.opted_in?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-500'}`}>
-                      {c.opted_in?'Opted In':'Not opted'}
-                    </span>
+                    <DeliveryBadge status={c.status}/>
                   </div>
                 ))}
               </div>
-              {ctxTotal > 50 && (
-                <p className="text-xs text-slate-400 text-center mt-3">Showing 50 of {ctxTotal} contacts</p>
-              )}
             </div>
           )}
         </div>
@@ -596,11 +670,12 @@ function EditModal({ broadcast: b, templates, contacts = [], onClose, onSaved })
 // ── Create Wizard ─────────────────────────────────────────────────────────────
 const STEPS = ['Details & Audience', 'Message', 'Preview', 'Schedule', 'Review & Send']
 
-function CreateWizard({ onClose, onCreated, templates, contacts }) {
+function CreateWizard({ onClose, onCreated, templates, contacts, onContactsChanged }) {
   const [step,   setStep]   = useState(0)
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [showBulkAdd, setShowBulkAdd] = useState(false)
   const [confirmChecked, setConfirmChecked] = useState(false)
 
   const [form, setForm] = useState({
@@ -748,7 +823,13 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
                 <input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="e.g. Diwali Offer 2024" className={inp}/>
               </div>
               <div>
-                <label className={lbl}>Select Audience <span className="text-red-400">*</span></label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className={`${lbl} mb-0`}>Select Audience <span className="text-red-400">*</span></label>
+                  <button type="button" onClick={()=>setShowBulkAdd(true)}
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors">
+                    + Bulk Add Contacts
+                  </button>
+                </div>
                 <ContactSelector
                   contacts={contacts}
                   selectedIds={form.selectedIds}
@@ -968,6 +1049,13 @@ function CreateWizard({ onClose, onCreated, templates, contacts }) {
         </div>
 
         {/* Confirmation dialog — nothing is sent until the user confirms here */}
+        {showBulkAdd && (
+          <BulkAddContacts
+            onClose={()=>setShowBulkAdd(false)}
+            onDone={()=>{ onContactsChanged && onContactsChanged() }}
+          />
+        )}
+
         {confirmOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={()=>!saving&&setConfirmOpen(false)}>
             <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden" onClick={e=>e.stopPropagation()}>
@@ -1035,24 +1123,24 @@ export default function Broadcasts() {
 
   useEffect(() => { load() }, [load])
 
+  const loadContacts = useCallback(async () => {
+    const all = []; let page = 1
+    while (true) {
+      try {
+        const { data } = await api.get(`/contacts?limit=100&page=${page}`)
+        const batch = data.contacts || []
+        all.push(...batch)
+        if (batch.length < 100 || page >= 50) break
+        page++
+      } catch { break }
+    }
+    setContacts(all)
+  }, [])
+
   useEffect(() => {
     api.get('/templates/local').then(r => setTemplates((r.data.templates||[]).filter(t=>t.status==='APPROVED'))).catch(()=>{})
-
-    const fetchAll = async () => {
-      const all = []; let page = 1
-      while (true) {
-        try {
-          const { data } = await api.get(`/contacts?limit=100&page=${page}`)
-          const batch = data.contacts || []
-          all.push(...batch)
-          if (batch.length < 100 || page >= 50) break
-          page++
-        } catch { break }
-      }
-      setContacts(all)
-    }
-    fetchAll()
-  }, [])
+    loadContacts()
+  }, [loadContacts])
 
   const sendNow = async id => {
     if (!confirm('Send this broadcast now?')) return
@@ -1250,7 +1338,7 @@ export default function Broadcasts() {
 
       {/* Modals */}
       {showCreate && (
-        <CreateWizard onClose={()=>setShowCreate(false)} onCreated={load} templates={templates} contacts={contacts}/>
+        <CreateWizard onClose={()=>setShowCreate(false)} onCreated={load} templates={templates} contacts={contacts} onContactsChanged={loadContacts}/>
       )}
       {viewing && (
         <ViewModal
@@ -1260,6 +1348,7 @@ export default function Broadcasts() {
           onDelete={id=>{ deleteBc(id); setViewing(null) }}
           onSend={id=>{ sendNow(id); setViewing(null) }}
           onReset={id=>{ resetBc(id); setViewing(null) }}
+          onResent={load}
         />
       )}
       {editing && (
