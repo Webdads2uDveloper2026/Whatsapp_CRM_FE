@@ -13,8 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate }                 from 'react-router-dom'
 import api                             from '../../services/api'
-import image1                          from '../../assets/webdadslogo.svg'
-import image2                          from '../../assets/webdadsicon.svg'
+import image1 from '../../assets/zylo-logo-white.png'
 
 const META_APP_ID = import.meta.env.VITE_META_APP_ID
 const CONFIG_ID   = import.meta.env.VITE_META_CONFIG_ID
@@ -375,8 +374,7 @@ export default function Onboarding() {
       {/* ── top bar ─────────────────────────────────────────── */}
       <div style={S.topBar}>
         <div style={S.logo}>
-          <img src={image2} alt="" style={{ width: 28, height: 28 }} />
-          <img src={image1} alt="Logo" style={{ width: 90, height: 28 }} />
+          <img src={image1} alt="Logo" style={{ width: 'auto', height: 28 }} />
         </div>
         <StepBar current={step} />
         <div style={{ width: 160 }} />

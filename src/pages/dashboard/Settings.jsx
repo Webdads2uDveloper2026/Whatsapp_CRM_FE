@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate }                      from 'react-router-dom'
 import api                                  from '../../services/api'
 import { useAuthStore }                     from '../../store/authStore'
@@ -47,6 +47,20 @@ export default function Settings() {
   const [registeringPhone, setRegisteringPhone]     = useState(false)
   const [registerPhoneError, setRegisterPhoneError] = useState('')
 
+  // Business status (WABA review, business verification, messaging limits)
+  const [businessStatus, setBusinessStatus]               = useState(null)
+  const [businessStatusLoading, setBusinessStatusLoading] = useState(false)
+  const [businessStatusError, setBusinessStatusError]     = useState('')
+
+  // Business profile (about/description/email/address/category/website)
+  const [bizProfileForm, setBizProfileForm]     = useState(null)   // null = not loaded yet
+  const [bizProfileLoading, setBizProfileLoading] = useState(false)
+  const [bizProfileError, setBizProfileError]     = useState('')
+  const [bizProfileSaving, setBizProfileSaving]   = useState(false)
+  const [bizProfileSaved, setBizProfileSaved]     = useState('')
+  const [photoUploading, setPhotoUploading]       = useState(false)
+  const [photoError, setPhotoError]               = useState('')
+
   // editable form state
   const [userForm,    setUserForm]    = useState({ business_name: '' })
   const [accountForm, setAccountForm] = useState({ website: '', industry: '', timezone: 'UTC' })
@@ -71,6 +85,8 @@ export default function Settings() {
     api.get('/agents').then(({ data }) => setTeamAgents(data || [])).catch(() => {})
     api.get('/roles').then(({ data }) => setTeamRoles(data)).catch(() => {})
     loadPhoneStatus()
+    loadBusinessStatus()
+    loadBusinessProfile()
   }, [])
 
   const loadPhoneStatus = async () => {
@@ -83,6 +99,84 @@ export default function Settings() {
       setPhoneStatusError(err.response?.data?.detail || 'Could not fetch phone status from Meta.')
     } finally {
       setPhoneStatusLoading(false)
+    }
+  }
+
+  const loadBusinessStatus = async () => {
+    setBusinessStatusLoading(true)
+    setBusinessStatusError('')
+    try {
+      const { data } = await api.get('/onboarding/business-status')
+      setBusinessStatus(data)
+    } catch (err) {
+      setBusinessStatusError(err.response?.data?.detail || 'Could not fetch business status from Meta.')
+    } finally {
+      setBusinessStatusLoading(false)
+    }
+  }
+
+  const loadBusinessProfile = async () => {
+    setBizProfileLoading(true)
+    setBizProfileError('')
+    try {
+      const { data } = await api.get('/onboarding/business-profile')
+      setBizProfileForm({
+        about:            data.about || '',
+        description:      data.description || '',
+        email:            data.email || '',
+        address:          data.address || '',
+        vertical:         data.vertical || 'UNDEFINED',
+        website:          (data.websites || [])[0] || '',
+        profile_picture_url: data.profile_picture_url || '',
+        vertical_options: data.vertical_options || ['UNDEFINED'],
+      })
+    } catch (err) {
+      setBizProfileError(err.response?.data?.detail || 'Could not fetch business profile from Meta.')
+    } finally {
+      setBizProfileLoading(false)
+    }
+  }
+
+  const saveBusinessProfile = async (e) => {
+    e.preventDefault()
+    setBizProfileSaving(true)
+    setBizProfileSaved('')
+    setBizProfileError('')
+    try {
+      await api.patch('/onboarding/business-profile', {
+        about:       bizProfileForm.about,
+        description: bizProfileForm.description,
+        email:       bizProfileForm.email,
+        address:     bizProfileForm.address,
+        vertical:    bizProfileForm.vertical,
+        websites:    bizProfileForm.website ? [bizProfileForm.website] : [],
+      })
+      setBizProfileSaved('Saved to WhatsApp')
+      setTimeout(() => setBizProfileSaved(''), 3000)
+    } catch (err) {
+      setBizProfileError(err.response?.data?.detail || 'Save failed. Please try again.')
+      setBizProfileSaved('error')
+      setTimeout(() => setBizProfileSaved(''), 4000)
+    } finally {
+      setBizProfileSaving(false)
+    }
+  }
+
+  const uploadProfilePhoto = async (file) => {
+    if (!file) return
+    setPhotoUploading(true)
+    setPhotoError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const { data } = await api.post('/onboarding/business-profile/photo', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setBizProfileForm(p => ({ ...p, profile_picture_url: data.profile_picture_url || p?.profile_picture_url }))
+    } catch (err) {
+      setPhotoError(err.response?.data?.detail || 'Photo upload failed. Please try again.')
+    } finally {
+      setPhotoUploading(false)
     }
   }
 
@@ -407,6 +501,33 @@ export default function Settings() {
               </>
             )}
           </div>
+
+          {/* ── Business status: WABA review, verification, messaging limits ── */}
+          {profile?.waba_connected && (
+            <BusinessStatusCard
+              status={businessStatus}
+              loading={businessStatusLoading}
+              error={businessStatusError}
+              onRefresh={loadBusinessStatus}
+            />
+          )}
+
+          {/* ── Business profile: about/description/email/address/category ── */}
+          {profile?.waba_connected && (
+            <BusinessProfileCard
+              form={bizProfileForm}
+              setForm={setBizProfileForm}
+              loading={bizProfileLoading}
+              error={bizProfileError}
+              saving={bizProfileSaving}
+              saved={bizProfileSaved}
+              onSubmit={saveBusinessProfile}
+              onRefresh={loadBusinessProfile}
+              onUploadPhoto={uploadProfilePhoto}
+              photoUploading={photoUploading}
+              photoError={photoError}
+            />
+          )}
 
           {/* ── Webhook setup card ──────────────────────────────── */}
           <div style={S.card}>
@@ -746,6 +867,249 @@ function PhoneStatusPanel({ phones, wabaId, activePhoneId, loading, error, onRef
         </div>
         )
       })}
+    </div>
+  )
+}
+
+// ─── Business status card ──────────────────────────────────────────────────
+function BusinessStatusCard({ status, loading, error, onRefresh }) {
+  const waba     = status?.waba
+  const business = status?.business
+  const limit    = status?.messaging_limit
+
+  return (
+    <div style={S.card}>
+      <p style={S.cardTitle}>
+        <span style={{ fontSize: 18 }}>📊</span>
+        Business Status
+        <button onClick={onRefresh} disabled={loading} style={{
+          marginLeft: 'auto', background: 'none', border: '1px solid #30363d', borderRadius: 7, padding: '4px 10px',
+          fontSize: 11, fontWeight: 400, color: loading ? '#484f58' : '#8b949e', cursor: loading ? 'not-allowed' : 'pointer',
+          fontFamily: 'inherit',
+        }}>
+          {loading ? 'Refreshing…' : '↺ Refresh'}
+        </button>
+      </p>
+
+      {error && (
+        <div style={{ background: 'rgba(248,81,73,.08)', border: '1px solid rgba(248,81,73,.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 10 }}>
+          <span style={{ fontSize: 12, color: '#f85149' }}>⚠ {error}</span>
+        </div>
+      )}
+
+      {loading && !status && (
+        <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '20px', textAlign: 'center' }}>
+          <span style={{ fontSize: 12, color: '#484f58' }}>Fetching live status from Meta…</span>
+        </div>
+      )}
+
+      {status && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12 }}>
+          {/* WABA account status */}
+          <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '14px 16px' }}>
+            <p style={{ margin: '0 0 6px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: '#484f58' }}>Account Status</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: waba?.review_color || '#8b949e' }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: waba?.review_color || '#8b949e' }}>{waba?.review_label || '—'}</span>
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#7d8590' }}>{waba?.name || ''}</p>
+          </div>
+
+          {/* Business verification */}
+          <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '14px 16px' }}>
+            <p style={{ margin: '0 0 6px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: '#484f58' }}>Business Verification</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: business?.verification_color || '#8b949e' }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: business?.verification_color || '#8b949e' }}>{business?.verification_label || '—'}</span>
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#7d8590' }}>{business?.name || ''}</p>
+            {business?.verification_status && business.verification_status !== 'verified' && (
+              <a href="https://business.facebook.com/settings/security" target="_blank" rel="noreferrer"
+                style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#388bfd', textDecoration: 'none' }}>
+                Start verification in Meta Business Manager →
+              </a>
+            )}
+          </div>
+
+          {/* Messaging limit tier */}
+          <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '14px 16px' }}>
+            <p style={{ margin: '0 0 6px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', color: '#484f58' }}>Messaging Limit</p>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3' }}>{limit?.tier_label || '—'}</span>
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#7d8590' }}>
+              Business-initiated conversations, per rolling 24h
+              {limit?.throughput_level && <> · Throughput: <strong style={{ color: '#c9d1d9' }}>{limit.throughput_level}</strong></>}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Messaging tiers ladder — mirrors Meta's WhatsApp Manager chart */}
+      {limit?.ladder && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #21262d' }}>
+          <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>Messaging Tiers</p>
+          <div style={{ display: 'flex', alignItems: 'stretch', border: '1px solid #21262d', borderRadius: 14, overflow: 'hidden', background: '#0d1117' }}>
+            {limit.ladder.map((rung, i) => (
+              rung.current ? (
+                // Current tier — an elevated "hero" box, matching WhatsApp Manager's treatment
+                <div key={rung.label} style={{
+                  flex: '1.3 1 0', margin: 8, padding: '18px 16px', textAlign: 'center',
+                  background: '#161b22', border: '1px solid rgba(56,139,253,.4)', borderRadius: 12,
+                  boxShadow: '0 0 0 1px rgba(56,139,253,.15), 0 4px 16px rgba(56,139,253,.12)',
+                }}>
+                  <span style={{ display: 'inline-block', marginBottom: 8, fontSize: 10, fontWeight: 700, color: '#388bfd', background: 'rgba(56,139,253,.15)', border: '1px solid rgba(56,139,253,.35)', borderRadius: 99, padding: '3px 10px', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    ✓ Current
+                  </span>
+                  <p style={{ margin: 0, fontSize: 26, fontWeight: 800, color: '#e6edf3', lineHeight: 1.1 }}>{rung.label}</p>
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: '#7d8590', lineHeight: 1.5 }}>
+                    Business-initiated conversations<br />in a rolling 24-hour period
+                  </p>
+                </div>
+              ) : (
+                // Other tiers — plain, muted, minimal (matches Meta's fainter columns)
+                <div key={rung.label} style={{
+                  flex: 1, padding: '14px 10px', textAlign: 'center', alignSelf: 'center',
+                  borderLeft: i > 0 && !limit.ladder[i - 1]?.current ? '1px solid #21262d' : 'none',
+                }}>
+                  <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#484f58' }}>{rung.label}</p>
+                </div>
+              )
+            ))}
+          </div>
+          {limit.available === false && (
+            <div style={{ marginTop: 10, background: 'rgba(210,153,34,.06)', border: '1px solid rgba(210,153,34,.2)', borderRadius: 10, padding: '10px 14px' }}>
+              <p style={{ margin: 0, fontSize: 11, color: '#d29922', lineHeight: 1.6 }}>
+                ⚠ Meta isn't returning a current tier for this number through the API (a known access-level gap, not something wrong on our end) —
+                so none of the tiers above is reliably known to be the one you're actually on. Check the exact live figure in WhatsApp Manager.
+              </p>
+            </div>
+          )}
+
+          {/* Path to the next tier */}
+          <div style={{ marginTop: 14, background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '14px 16px' }}>
+            <p style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>Increase your messaging limit</p>
+            <p style={{ margin: 0, fontSize: 11, color: '#7d8590', lineHeight: 1.6 }}>
+              Meta raises this automatically once either condition is met — <strong style={{ color: '#c9d1d9' }}>verify your business</strong>,
+              {' '}or start high-quality conversations with <strong style={{ color: '#c9d1d9' }}>1,000+ unique customers in a rolling 7-day period</strong>.
+              Live progress toward the 7-day threshold isn't exposed by Meta's API, so check it in WhatsApp Manager.
+            </p>
+            <a href="https://business.facebook.com/wa/manage/messaging-limits/" target="_blank" rel="noreferrer"
+              style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#388bfd', textDecoration: 'none' }}>
+              View live progress in WhatsApp Manager →
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Business profile card ──────────────────────────────────────────────────
+function BusinessProfileCard({ form, setForm, loading, error, saving, saved, onSubmit, onRefresh, onUploadPhoto, photoUploading, photoError }) {
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const fileInputRef = useRef(null)
+
+  return (
+    <div style={S.card}>
+      <p style={S.cardTitle}>
+        <span style={{ fontSize: 18 }}>🪪</span>
+        Business Profile
+        <button onClick={onRefresh} disabled={loading} style={{
+          marginLeft: 'auto', background: 'none', border: '1px solid #30363d', borderRadius: 7, padding: '4px 10px',
+          fontSize: 11, fontWeight: 400, color: loading ? '#484f58' : '#8b949e', cursor: loading ? 'not-allowed' : 'pointer',
+          fontFamily: 'inherit',
+        }}>
+          {loading ? 'Refreshing…' : '↺ Refresh'}
+        </button>
+      </p>
+      <p style={{ fontSize: 13, color: '#7d8590', lineHeight: 1.7, margin: '0 0 20px' }}>
+        What contacts see when they open this chat on WhatsApp — the same fields as Meta Business Manager → WhatsApp Manager → Profile. Changes save directly to Meta.
+      </p>
+
+      {error && (
+        <div style={{ background: 'rgba(248,81,73,.08)', border: '1px solid rgba(248,81,73,.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: '#f85149' }}>⚠ {error}</span>
+        </div>
+      )}
+
+      {loading && !form && (
+        <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 12, padding: '20px', textAlign: 'center' }}>
+          <span style={{ fontSize: 12, color: '#484f58' }}>Fetching profile from Meta…</span>
+        </div>
+      )}
+
+      {form && (
+        <form onSubmit={onSubmit}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {form.profile_picture_url ? (
+                <img src={form.profile_picture_url} alt="Profile" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '1px solid #30363d', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#1c2128', border: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🪪</div>
+              )}
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(f); e.target.value = '' }}
+                />
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={photoUploading}
+                  style={{ ...S.btn, padding: '6px 14px', fontSize: 12, background: photoUploading ? '#21262d' : '#1c2128', color: photoUploading ? '#484f58' : '#c9d1d9', border: '1px solid #30363d' }}>
+                  {photoUploading ? 'Uploading…' : '📷 Change Photo'}
+                </button>
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: '#7d8590' }}>JPG or PNG. Saves straight to WhatsApp.</p>
+                {photoError && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#f85149' }}>⚠ {photoError}</p>}
+              </div>
+            </div>
+            <div>
+              <label style={S.label}>About</label>
+              <input value={form.about} onChange={e => set('about', e.target.value)}
+                placeholder="A short status line, e.g. business hours" maxLength={139}
+                style={S.input} onFocus={onFocus} onBlur={onBlur} />
+            </div>
+            <div>
+              <label style={S.label}>Description</label>
+              <textarea value={form.description} onChange={e => set('description', e.target.value)}
+                placeholder="What your business does" maxLength={512} rows={3}
+                style={{ ...S.input, resize: 'vertical', fontFamily: 'inherit' }} onFocus={onFocus} onBlur={onBlur} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <label style={S.label}>Support Email</label>
+                <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
+                  placeholder="support@yourbusiness.com" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label style={S.label}>Website</label>
+                <input value={form.website} onChange={e => set('website', e.target.value)}
+                  placeholder="https://yourbusiness.com" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+            </div>
+            <div>
+              <label style={S.label}>Address</label>
+              <input value={form.address} onChange={e => set('address', e.target.value)}
+                placeholder="Street, city, country" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+            </div>
+            <div>
+              <label style={S.label}>Category</label>
+              <div style={{ position: 'relative' }}>
+                <select value={form.vertical} onChange={e => set('vertical', e.target.value)}
+                  style={S.select} onFocus={onFocus} onBlur={onBlur}>
+                  {(form.vertical_options || ['UNDEFINED']).map(v => (
+                    <option key={v} value={v}>{v.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+                <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: '#484f58', pointerEvents: 'none', fontSize: 11 }}>▼</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <SaveBar saving={saving} saved={saved} />
+          </div>
+        </form>
+      )}
     </div>
   )
 }

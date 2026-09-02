@@ -36,6 +36,31 @@ function DeliveryBadge({ status }) {
   return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${s.cls}`}>{s.label}</span>
 }
 
+// Failure root-cause buckets — keys must match app/services/failure_categories.py
+// (backend groups each failed message's Meta error into one of these).
+const FAILURE_CAT = {
+  undeliverable:    { icon:'📵', label:'Message Undeliverable',   cls:'bg-red-50 text-red-600 border-red-200',
+                       hint:"This number isn't a valid WhatsApp user." },
+  marketing_capped: { icon:'🚫', label:'Marketing Message Limit', cls:'bg-orange-50 text-orange-600 border-orange-200',
+                       hint:'Your marketing message limit is reached.' },
+  window_expired:   { icon:'🕐', label:'Messaging Window Expired',cls:'bg-amber-50 text-amber-600 border-amber-200',
+                       hint:'The required messaging window has expired.' },
+  other:            { icon:'⚠️', label:'Other',                   cls:'bg-slate-100 text-slate-500 border-slate-200',
+                       hint:'See the error details on the recipient.' },
+}
+// Mirrors app/services/failure_categories.py::categorize_failure (code → bucket,
+// no text sniffing) — used only to pick an icon for a single recipient's error
+// inline; the authoritative counts come from the backend's `failure_breakdown`.
+const FAILURE_CODE_MAP = {
+  131026: 'undeliverable', 131030: 'undeliverable', 1013: 'undeliverable', 133010: 'undeliverable',
+  131049: 'marketing_capped',
+  131047: 'window_expired',
+}
+function categorizeError(error) {
+  if (!error) return 'other'
+  return FAILURE_CODE_MAP[Number(error.code)] || 'other'
+}
+
 const TZ = 'Asia/Kolkata'
 // Backend may return IST-offset strings ("+05:30") or legacy naive UTC strings.
 // Ensure naive strings are treated as UTC before converting to IST for display.
@@ -314,6 +339,8 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset, o
   const nDelivered = a.delivered ?? stat.delivered_count ?? 0
   const nRead      = a.read      ?? stat.read_count      ?? 0
   const nFailed    = a.failed    ?? stat.failed_count    ?? 0
+  const nPending   = a.pending   ?? 0
+  const breakdown  = a.failure_breakdown || {}
 
   const failedCount = statusCounts?.failed ?? nFailed
   const resendFailed = async () => {
@@ -434,6 +461,41 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset, o
                   </div>
                 </div>
               ))}
+
+              {/* Why messages failed — per Meta error-code category */}
+              {nFailed > 0 && (
+                <div className="pt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Why {nFailed.toLocaleString()} failed</p>
+                  <div className="space-y-2">
+                    {Object.entries(breakdown)
+                      .filter(([, n]) => n > 0)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([key, n]) => {
+                        const c = FAILURE_CAT[key] || FAILURE_CAT.other
+                        return (
+                          <div key={key} className={`flex items-start gap-2.5 rounded-xl p-3 border ${c.cls}`} title={c.hint}>
+                            <span className="text-base leading-none shrink-0">{c.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold">{c.label}</span>
+                                <span className="text-xs font-bold shrink-0">{n.toLocaleString()} <span className="opacity-70">({pct(n, nFailed)}%)</span></span>
+                              </div>
+                              <p className="text-[11px] opacity-80 mt-0.5">{c.hint}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* Sent, not yet confirmed delivered/read/failed */}
+              {nPending > 0 && (
+                <div className="flex items-center justify-between bg-slate-50 rounded-xl p-3 border border-slate-100">
+                  <span className="text-xs font-medium text-slate-600">⏳ Sent / Pending — waiting for delivery confirmation</span>
+                  <span className="text-xs font-bold text-slate-700">{nPending.toLocaleString()}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -486,7 +548,7 @@ function ViewModal({ broadcast: b, onClose, onEdit, onDelete, onSend, onReset, o
                       <p className="text-xs text-slate-400 font-mono">+{c.wa_id}</p>
                       {c.status==='failed' && c.error && (
                         <p className="text-[11px] text-red-500 mt-0.5 truncate" title={c.error.details||c.error.message}>
-                          ⚠ {c.error.details || c.error.message || `Error ${c.error.code||''}`}
+                          {FAILURE_CAT[categorizeError(c.error)].icon} {c.error.details || c.error.message || `Error ${c.error.code||''}`}
                         </p>
                       )}
                     </div>

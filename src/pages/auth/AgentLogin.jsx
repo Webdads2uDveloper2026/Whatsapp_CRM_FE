@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAgentStore } from '../../store/agentStore'
-import image1 from '../../assets/webdadslogo.svg'
-import image2 from '../../assets/webdadsicon.svg'
+import image1 from '../../assets/zylo-logo-white.png'
+// import image2 from '../../assets/zylo-icon.png'
 
 const s = {
   page: { minHeight:'100vh', background:'#0d1117', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px', fontFamily:"'Inter',system-ui,sans-serif" },
@@ -58,8 +58,8 @@ export default function AgentLogin() {
     <div style={s.page}>
       <div style={s.card}>
         <div style={s.logo}>
-          <img src={image2} alt="Logo" style={{ width:'40px', height:'40px' }} />
-          <img src={image1} alt="Logo" style={{ width:'100px', height:'40px' }} />
+         
+          <img src={image1} alt="Logo" style={{ width:'auto', height:'40px' }} />
         </div>
 
         <div style={s.box}>

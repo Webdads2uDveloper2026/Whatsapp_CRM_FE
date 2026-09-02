@@ -323,6 +323,31 @@ function MediaAudio({ c }) {
   );
 }
 
+function MediaSticker({ c }) {
+  const { url, error } = useProxiedMediaUrl(c.id || c.sticker?.id || c.url);
+  return (
+    <div className="flex flex-col items-center gap-1 p-1">
+      {url ? (
+        <img
+          src={url}
+          alt="Sticker"
+          className="w-32 h-32 object-contain cursor-pointer"
+          onClick={() => window.open(url, "_blank")}
+        />
+      ) : (
+        <div
+          className="w-32 h-32 flex items-center justify-center"
+          title={error ? "Failed to load sticker" : "Loading sticker…"}
+        >
+          <span className="text-5xl">
+            {error ? "❓" : c.animated ? "✨" : "😊"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MediaDocument({ c }) {
   const { url } = useProxiedMediaUrl(c.id || c.document?.id || c.url);
   return (
@@ -1339,12 +1364,7 @@ export default function Inbox() {
         case "document":
           return <MediaDocument c={c} />;
         case "sticker":
-          return (
-            <div className="flex flex-col items-center gap-1 p-1">
-              <span className="text-5xl">{c.animated ? "✨" : "😊"}</span>
-              <span className="text-[9px] text-slate-500">Sticker</span>
-            </div>
-          );
+          return <MediaSticker c={c} />;
         case "location":
           return (
             <div className="min-w-[160px] max-w-[220px]">

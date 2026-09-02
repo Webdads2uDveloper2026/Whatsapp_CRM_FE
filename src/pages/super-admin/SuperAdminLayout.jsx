@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useSuperAdminStore } from '../../store/superAdminStore'
-import image1 from '../../assets/webdadslogo.svg'
-import image2 from '../../assets/webdadsicon.svg'
+import image1 from '../../assets/zylo-logo-white.png'
 
 const NAV = [
   { to: '/super-admin',                       emoji: '📊', label: 'Dashboard'    },
@@ -25,10 +24,7 @@ export default function SuperAdminLayout() {
 
         {/* Logo header */}
         <div style={{ display:'flex', alignItems:'center', gap:collapsed?0:'10px', justifyContent:collapsed?'center':'flex-start', padding:collapsed?'16px 0':'16px', height:'60px', borderBottom:'1px solid #21262d' }}>
-          <div style={{ width:'32px', height:'32px', borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <img src={image2} alt="Logo" style={{ width:'24px', height:'24px' }} />
-          </div>
-          {!collapsed && <img src={image1} alt="Logo" style={{ width:'100px', height:'32px' }} />}
+          {!collapsed && <img src={image1} alt="Logo" style={{ width:'auto', height:'32px' }} />}
           {!collapsed && (
             <button onClick={() => setCollapsed(true)} style={{ background:'none', border:'none', color:'#6e7681', cursor:'pointer', fontSize:'16px', padding:'2px 4px', marginLeft:'auto' }}>‹</button>
           )}

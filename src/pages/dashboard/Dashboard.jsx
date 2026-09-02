@@ -16,6 +16,59 @@ const CARDS = [
 
 const get = (obj, keys) => keys.reduce((o,k) => o?.[k], obj)
 
+// Message kinds WhatsApp's Cloud API never delivers content for — Meta only
+// sends a generic "unsupported" event for these (see app/api/v1/webhook.py's
+// _UNSUPPORTED_KIND_LABEL, which the Inbox uses to label them the same way).
+const UNSUPPORTED_TYPES = [
+  { label: 'Poll',                       note: 'A poll someone created or sent' },
+  { label: 'Poll vote',                  note: 'A vote cast on a poll' },
+  { label: 'GIF',                        note: "Picked from WhatsApp's built-in GIF search" },
+  { label: 'Group invite',               note: 'A WhatsApp group invite link' },
+  { label: 'Link preview',               note: 'A rich link-preview card (URL + title/image)' },
+  { label: 'Pinned message',             note: 'A "message pinned" event' },
+  { label: 'Kept disappearing message',  note: 'A disappearing message someone "kept"' },
+  { label: 'Edited message',             note: 'A "message was edited" event' },
+  { label: 'Structured message',         note: "An internal WhatsApp app template format" },
+  { label: 'View-once photo/video',      note: 'The media itself is never sent to any business' },
+]
+
+function UnsupportedTypesCard() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ background:'#161b22', border:'1px solid #21262d', borderRadius:'14px', marginTop:'28px', overflow:'hidden' }}>
+      <button onClick={()=>setOpen(o=>!o)}
+        style={{ width:'100%', display:'flex', alignItems:'center', gap:'12px', padding:'16px 20px', background:'none', border:'none', cursor:'pointer', fontFamily:'inherit', textAlign:'left' }}>
+        <span style={{ fontSize:'18px' }}>ℹ️</span>
+        <div style={{ flex:1 }}>
+          <p style={{ fontSize:'13px', fontWeight:'600', color:'#e6edf3' }}>Message types WhatsApp doesn't deliver</p>
+          <p style={{ fontSize:'11px', color:'#8b949e', marginTop:'2px' }}>Polls, GIFs, view-once media and a few others show as "Unsupported" in the Inbox — this is a WhatsApp platform limit, not a bug.</p>
+        </div>
+        <span style={{ fontSize:'12px', color:'#8b949e', transform: open ? 'rotate(180deg)' : 'none', transition:'transform .15s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding:'0 20px 20px' }}>
+          <div style={{ borderTop:'1px solid #21262d', paddingTop:'14px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:'8px' }}>
+              {UNSUPPORTED_TYPES.map(t => (
+                <div key={t.label} style={{ background:'#0d1117', border:'1px solid #21262d', borderRadius:'10px', padding:'10px 12px' }}>
+                  <p style={{ fontSize:'12px', fontWeight:'600', color:'#e6edf3' }}>{t.label}</p>
+                  <p style={{ fontSize:'11px', color:'#8b949e', marginTop:'2px' }}>{t.note}</p>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize:'11px', color:'#8b949e', marginTop:'12px', lineHeight:1.5 }}>
+              A few other names (button, list, interactive, image, location, order, product, reaction)
+              can also appear as "Unsupported" — but only for WhatsApp-app-only edge cases of those
+              types (e.g. a native status reaction). The everyday version of each already works
+              normally in this Inbox.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [days, setDays]   = useState(7)
@@ -111,6 +164,8 @@ export default function Dashboard() {
           </button>
         ))}
       </div>
+
+      <UnsupportedTypesCard />
     </div>
   )
 }
